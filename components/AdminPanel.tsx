@@ -61,7 +61,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUs
           name: formData.name,
           role: formData.role || Role.SCHEDULER,
           departmentScope: formData.departmentScope || 'All',
-          lastLogin: '-'
         };
         onUpdateUsers([...users, user]);
       }
@@ -128,7 +127,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     name TEXT NOT NULL,
     role TEXT NOT NULL,
     "departmentScope" TEXT NOT NULL,
-    "lastLogin" TEXT
+    "lastLogin" TIMESTAMP WITH TIME ZONE
 );
 
 CREATE TABLE IF NOT EXISTS public.terms (

@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Arial", "Helvetica", sans-serif;
+  --font-mono: "Courier New", Courier, monospace;
+}
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    color: #333333;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  body {
+    background: #f1f5f9;
+  }
+
+  /* Custom Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-left: 1px solid #ccc;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #c1c1c1; 
+    border-radius: 0;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8; 
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@layer components {
+  /* Enterprise Button Base */
+  .btn-modern {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold transition-colors disabled:opacity-50 disabled:pointer-events-none rounded-sm border;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold transition-colors disabled:opacity-50 disabled:pointer-events-none rounded-sm border border-[#0d3b76] bg-[#185baf] text-white hover:bg-[#124584] shadow-none;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold transition-colors disabled:opacity-50 disabled:pointer-events-none rounded-sm border border-[#ccc] bg-white text-[#333] hover:bg-[#e6e6e6] shadow-none;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold transition-colors disabled:opacity-50 disabled:pointer-events-none rounded-sm border border-[#ac2925] bg-[#d9534f] text-white hover:bg-[#c9302c] shadow-none;
+  }
+
+  /* Enterprise Input Base */
+  .input-modern {
+    @apply w-full bg-white border border-[#ccc] rounded-sm px-2 py-1.5 text-xs text-[#333] outline-none focus:border-[#185baf] transition-colors placeholder:text-[#999];
+  }
+
+  /* Enterprise Card Base */
+  .card-modern {
+    @apply bg-white border border-[#c1c1c1] shadow-[0_1px_3px_rgba(0,0,0,0.05)] rounded-none overflow-hidden;
+  }
+
+  /* Enterprise Label */
+  .label-modern {
+    @apply text-[10px] font-bold text-[#666] uppercase tracking-wider mb-1 block;
+  }
+}
+
+.glass {
+  @apply bg-white border border-[#ccc];
+}
+
+.animate-float {
+  /* No animations for enterprise */
+}

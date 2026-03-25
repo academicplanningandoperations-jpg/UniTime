@@ -1,0 +1,527 @@
+import React, { useRef, useState } from 'react';
+import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2 } from 'lucide-react';
+import { Course, Faculty, Room, StudentGroup } from '../types';
+import { motion, AnimatePresence } from 'framer-motion';
+
+interface DataImportPanelProps {
+  courses: Course[];
+  faculties: Faculty[];
+  rooms: Room[];
+  groups: StudentGroup[];
+  onUploadCourses: (data: Course[]) => void;
+  onUploadFaculties: (data: Faculty[]) => void;
+  onUploadRooms: (data: Room[]) => void;
+  onUploadGroups: (data: StudentGroup[]) => void;
+}
+
+type ImportType = 'Modules' | 'Faculties' | 'Rooms' | 'Groups';
+
+const DataImportPanel: React.FC<DataImportPanelProps> = ({
+  courses, faculties, rooms, groups,
+  onUploadCourses, onUploadFaculties, onUploadRooms, onUploadGroups
+}) => {
+  const [activeTab, setActiveTab] = useState<ImportType>('Modules');
+  const [lastUpload, setLastUpload] = useState<{ type: string; count: number } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeImportType, setActiveImportType] = useState<ImportType | null>(null);
+  const [newItem, setNewItem] = useState<any>({});
+
+  const templates = {
+    Modules: "_module_id,_unique_name,_name,_academic_year,Semester\n1,CHCE2028_2,Chemical Technology,2025,SEM-3\n2,CS101,Intro to CS,2025,SEM-1",
+    Faculties: "_staff_id,_Faculty_ID,_Faculty_name,_deptName,_email\n1,600001,SOCSVISITING 01,School of Business,SOCSVISITING01@mail.com\n2,600002,Alan Turing,Computer Science,alan@mail.com",
+    Rooms: "_room_id,_unique_name,_name,_custom1,_custom2\n1,K1007,K1007,AYRQ18096,AYRQ18096\n2,L202,L202,LAB,LAB",
+    Groups: "_group_id,_unique_name,_name\n1,BCOM-H-ECOM&BI-V-B1,BCOM-H-ECOM&BI-V-B1\n2,CS-Y1-A,CS-Y1-A"
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeImportType) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const rows = text.split('\n').filter(row => row.trim() !== '');
+      if (rows.length < 2) return;
+      const headers = rows[0].split(',').map(h => h.trim());
+      
+      const parsedRows = rows.slice(1).map(row => {
+        const values = row.split(',');
+        return headers.reduce((obj: any, header, index) => {
+          obj[header] = values[index]?.trim();
+          return obj;
+        }, {});
+      });
+
+      const mappedData = parsedRows.map((item, i) => {
+        // We will store the original raw fields back onto the generated objects so we can display them perfectly
+        // We also provide required TS fallback values for the app engine to avoid crashes
+        if (activeImportType === 'Modules') {
+          return {
+            id: item._module_id || `m-${Date.now()}-${i}`,
+            code: item._unique_name || `M${i}`,
+            name: item._name || 'Unknown Module',
+            academicYear: item._academic_year || '2025',
+            semester: Number(item.Semester?.replace('SEM-', '')) || 1,
+            // Fallbacks
+            credits: 3, department: 'General', duration: 1, type: 'Theory',
+            // Store raw
+            _module_id: item._module_id,
+            _unique_name: item._unique_name,
+            _name: item._name,
+            _academic_year: item._academic_year,
+            Semester: item.Semester
+          };
+        }
+        if (activeImportType === 'Faculties') {
+          return {
+            id: item._staff_id || item._Faculty_ID || `f-${Date.now()}-${i}`,
+            name: item._Faculty_name || 'Unknown Faculty',
+            department: item._deptName || 'General',
+            email: item._email || '',
+            // Fallbacks
+            maxHoursPerWeek: 18, availability: [],
+            // Store raw
+            _staff_id: item._staff_id,
+            _Faculty_ID: item._Faculty_ID,
+            _Faculty_name: item._Faculty_name,
+            _deptName: item._deptName,
+            _email: item._email
+          };
+        }
+        if (activeImportType === 'Rooms') {
+          return {
+            id: item._room_id || item._unique_name || `r-${Date.now()}-${i}`,
+            name: item._name || item._unique_name || 'Unknown Room',
+            // Fallbacks
+            capacity: 60, type: 'Lecture',
+            // Store raw
+            _room_id: item._room_id,
+            _unique_name: item._unique_name,
+            _name: item._name,
+            _custom1: item._custom1,
+            _custom2: item._custom2
+          };
+        }
+        if (activeImportType === 'Groups') {
+          return {
+            id: item._group_id || item._unique_name || `g-${Date.now()}-${i}`,
+            name: item._name || item._unique_name || 'Unknown Group',
+            // Fallbacks
+            program: 'General', semester: 1, studentCount: 30,
+            // Store raw
+            _group_id: item._group_id,
+            _unique_name: item._unique_name,
+            _name: item._name
+          };
+        }
+        return item;
+      });
+
+      if (activeImportType === 'Modules') onUploadCourses([...courses, ...mappedData as any[]]);
+      if (activeImportType === 'Faculties') onUploadFaculties([...faculties, ...mappedData as any[]]);
+      if (activeImportType === 'Rooms') onUploadRooms([...rooms, ...mappedData as any[]]);
+      if (activeImportType === 'Groups') onUploadGroups([...groups, ...mappedData as any[]]);
+      
+      setLastUpload({ type: activeImportType, count: mappedData.length });
+      setTimeout(() => setLastUpload(null), 5000);
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const deleteItem = (type: ImportType, id: string) => {
+    if (type === 'Modules') onUploadCourses(courses.filter(c => c.id !== id));
+    if (type === 'Faculties') onUploadFaculties(faculties.filter(f => f.id !== id));
+    if (type === 'Rooms') onUploadRooms(rooms.filter(r => r.id !== id));
+    if (type === 'Groups') onUploadGroups(groups.filter(g => g.id !== id));
+  };
+
+  const clearAllData = () => {
+    if (confirm(`Are you sure you want to delete EVERY record in ${activeTab}? This cannot be undone.`)) {
+       if (activeTab === 'Modules') onUploadCourses([]);
+       if (activeTab === 'Faculties') onUploadFaculties([]);
+       if (activeTab === 'Rooms') onUploadRooms([]);
+       if (activeTab === 'Groups') onUploadGroups([]);
+    }
+  };
+
+  const addNewItem = () => {
+    if (activeTab === 'Modules') {
+      const item: any = { 
+        id: newItem._module_id || `m-${Date.now()}`, 
+        code: newItem._unique_name || 'M-NEW', 
+        name: newItem._name || 'New Module', 
+        academicYear: newItem._academic_year || '2025',
+        semester: Number(newItem.Semester?.replace('SEM-', '')) || 1,
+        credits: 3, duration: 1, type: 'Theory', 
+        _module_id: newItem._module_id,
+        _unique_name: newItem._unique_name,
+        _name: newItem._name,
+        _academic_year: newItem._academic_year,
+        Semester: newItem.Semester
+      };
+      onUploadCourses([...courses, item as any]);
+    } else if (activeTab === 'Faculties') {
+      const item: any = { 
+        id: newItem._staff_id || `f-${Date.now()}`, 
+        name: newItem._Faculty_name || 'New Faculty', 
+        department: newItem._deptName || 'General', 
+        email: newItem._email,
+        availability: [], maxHoursPerWeek: 18, // defaults
+        _staff_id: newItem._staff_id,
+        _Faculty_ID: newItem._Faculty_ID,
+        _Faculty_name: newItem._Faculty_name,
+        _deptName: newItem._deptName,
+        _email: newItem._email
+      };
+      onUploadFaculties([...faculties, item]);
+    } else if (activeTab === 'Rooms') {
+      const item: any = { 
+        id: newItem._room_id || `r-${Date.now()}`, 
+        name: newItem._name || 'New Room', 
+        capacity: 60, type: 'Lecture', 
+        _room_id: newItem._room_id,
+        _unique_name: newItem._unique_name,
+        _name: newItem._name,
+        _custom1: newItem._custom1,
+        _custom2: newItem._custom2
+      };
+      onUploadRooms([...rooms, item]);
+    } else if (activeTab === 'Groups') {
+      const item: any = { 
+        id: newItem._group_id || `g-${Date.now()}`, 
+        name: newItem._name || 'New Cohort', 
+        program: 'General', semester: 1, studentCount: 30, // defaults 
+        _group_id: newItem._group_id,
+        _unique_name: newItem._unique_name,
+        _name: newItem._name
+      };
+      onUploadGroups([...groups, item]);
+    }
+    setNewItem({});
+  };
+
+  const getIcon = (type: ImportType) => {
+    switch (type) {
+      case 'Modules': return <BookOpen className="w-4 h-4" />;
+      case 'Faculties': return <User className="w-4 h-4" />;
+      case 'Rooms': return <MapPin className="w-4 h-4" />;
+      case 'Groups': return <Users className="w-4 h-4" />;
+    }
+  };
+
+  const currentData = activeTab === 'Modules' ? courses : activeTab === 'Faculties' ? faculties : activeTab === 'Rooms' ? rooms : groups;
+
+  const renderTableHeaders = () => {
+    if (activeTab === 'Modules') return (
+      <tr>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_module_id</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_unique_name</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_name</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_academic_year</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">Semester</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase text-right">Actions</th>
+      </tr>
+    );
+    if (activeTab === 'Faculties') return (
+      <tr>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_staff_id</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_Faculty_ID</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_Faculty_name</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_deptName</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_email</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase text-right">Actions</th>
+      </tr>
+    );
+    if (activeTab === 'Rooms') return (
+      <tr>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_room_id</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_unique_name</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_name</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_custom1</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_custom2</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase text-right">Actions</th>
+      </tr>
+    );
+    return (
+      <tr>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_group_id</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_unique_name</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_name</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase text-right">Actions</th>
+      </tr>
+    );
+  };
+
+  const renderTableRows = () => {
+    return currentData.map((item: any) => (
+      <tr key={item.id} className="hover:bg-[#f5f5f5] transition-colors divide-x divide-[#eee] text-xs text-[#333]">
+        {activeTab === 'Modules' && (
+          <>
+            <td className="px-3 py-2 font-bold">{item._module_id || item.id}</td>
+            <td className="px-3 py-2">{item._unique_name || item.code}</td>
+            <td className="px-3 py-2">{item._name || item.name}</td>
+            <td className="px-3 py-2">{item._academic_year || item.academicYear || 2025}</td>
+            <td className="px-3 py-2">{item.Semester || `SEM-${item.semester || 1}`}</td>
+          </>
+        )}
+        {activeTab === 'Faculties' && (
+          <>
+            <td className="px-3 py-2 font-bold">{item._staff_id || item.id}</td>
+            <td className="px-3 py-2">{item._Faculty_ID}</td>
+            <td className="px-3 py-2">{item._Faculty_name || item.name}</td>
+            <td className="px-3 py-2">{item._deptName || item.department}</td>
+            <td className="px-3 py-2">{item._email || item.email || '-'}</td>
+          </>
+        )}
+        {activeTab === 'Rooms' && (
+          <>
+            <td className="px-3 py-2 font-bold">{item._room_id || item.id}</td>
+            <td className="px-3 py-2">{item._unique_name || item.name}</td>
+            <td className="px-3 py-2">{item._name || item.name}</td>
+            <td className="px-3 py-2">{item._custom1 || '-'}</td>
+            <td className="px-3 py-2">{item._custom2 || '-'}</td>
+          </>
+        )}
+        {activeTab === 'Groups' && (
+          <>
+            <td className="px-3 py-2 font-bold">{item._group_id || item.id}</td>
+            <td className="px-3 py-2">{item._unique_name || item.name}</td>
+            <td className="px-3 py-2">{item._name || item.name}</td>
+          </>
+        )}
+        <td className="px-3 py-2 text-right">
+          <button 
+            onClick={() => deleteItem(activeTab, item.id)} 
+            className="p-1.5 text-[#ac2925] hover:bg-[#ebd5d5] hover:text-[#ac2925] border border-transparent hover:border-[#ac2925] transition-all"
+            title="Delete Record"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </td>
+      </tr>
+    ));
+  };
+
+  const renderManualEntryForm = () => {
+    if (activeTab === 'Modules') return (
+      <div className="space-y-3">
+        <label className="text-[11px] font-bold text-[#333] uppercase">_module_id</label>
+        <input type="text" value={newItem._module_id || ''} onChange={e => setNewItem({...newItem, _module_id: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_unique_name</label>
+        <input type="text" value={newItem._unique_name || ''} onChange={e => setNewItem({...newItem, _unique_name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_name</label>
+        <input type="text" value={newItem._name || ''} onChange={e => setNewItem({...newItem, _name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_academic_year</label>
+        <input type="text" value={newItem._academic_year || ''} onChange={e => setNewItem({...newItem, _academic_year: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. 2025" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">Semester</label>
+        <input type="text" value={newItem.Semester || ''} onChange={e => setNewItem({...newItem, Semester: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. SEM-1" />
+      </div>
+    );
+
+    if (activeTab === 'Faculties') return (
+      <div className="space-y-3">
+        <label className="text-[11px] font-bold text-[#333] uppercase">_staff_id</label>
+        <input type="text" value={newItem._staff_id || ''} onChange={e => setNewItem({...newItem, _staff_id: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_Faculty_ID</label>
+        <input type="text" value={newItem._Faculty_ID || ''} onChange={e => setNewItem({...newItem, _Faculty_ID: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+
+        <label className="text-[11px] font-bold text-[#333] uppercase">_Faculty_name</label>
+        <input type="text" value={newItem._Faculty_name || ''} onChange={e => setNewItem({...newItem, _Faculty_name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+
+        <label className="text-[11px] font-bold text-[#333] uppercase">_deptName</label>
+        <input type="text" value={newItem._deptName || ''} onChange={e => setNewItem({...newItem, _deptName: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_email</label>
+        <input type="email" value={newItem._email || ''} onChange={e => setNewItem({...newItem, _email: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+      </div>
+    );
+
+    if (activeTab === 'Rooms') return (
+      <div className="space-y-3">
+        <label className="text-[11px] font-bold text-[#333] uppercase">_room_id</label>
+        <input type="text" value={newItem._room_id || ''} onChange={e => setNewItem({...newItem, _room_id: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_unique_name</label>
+        <input type="text" value={newItem._unique_name || ''} onChange={e => setNewItem({...newItem, _unique_name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_name</label>
+        <input type="text" value={newItem._name || ''} onChange={e => setNewItem({...newItem, _name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_custom1</label>
+        <input type="text" value={newItem._custom1 || ''} onChange={e => setNewItem({...newItem, _custom1: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+
+        <label className="text-[11px] font-bold text-[#333] uppercase">_custom2</label>
+        <input type="text" value={newItem._custom2 || ''} onChange={e => setNewItem({...newItem, _custom2: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+      </div>
+    );
+
+    // Groups
+    return (
+      <div className="space-y-3">
+        <label className="text-[11px] font-bold text-[#333] uppercase">_group_id</label>
+        <input type="text" value={newItem._group_id || ''} onChange={e => setNewItem({...newItem, _group_id: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+        
+        <label className="text-[11px] font-bold text-[#333] uppercase">_unique_name</label>
+        <input type="text" value={newItem._unique_name || ''} onChange={e => setNewItem({...newItem, _unique_name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+
+        <label className="text-[11px] font-bold text-[#333] uppercase">_name</label>
+        <input type="text" value={newItem._name || ''} onChange={e => setNewItem({...newItem, _name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6 p-2 w-full">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b-2 border-[#185baf] pb-2">
+        <div>
+          <h2 className="text-xl font-bold text-[#333] tracking-tight">Resource Management</h2>
+          <p className="text-sm font-medium text-[#666]">Configure institutional data manually or via bulk CSV upload.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <AnimatePresence>
+            {lastUpload && (
+              <motion.div 
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="flex items-center gap-2 bg-[#dff0d8] text-[#3c763d] px-3 py-1.5 border border-[#d6e9c6] text-sm font-bold shadow"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Imported {lastUpload.count} {lastUpload.type}
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <button 
+            onClick={clearAllData} 
+            className="flex items-center gap-2 px-3 py-1.5 text-[#ac2925] hover:bg-[#ebd5d5] font-bold text-sm transition-colors border border-transparent hover:border-[#ac2925]"
+          >
+            <RefreshCcw className="w-4 h-4" />
+            Wipe {activeTab}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex bg-[#f0f0f0] border-b border-[#ccc] w-full shadow-sm">
+        {(['Modules', 'Faculties', 'Rooms', 'Groups'] as ImportType[]).map(t => (
+          <button 
+            key={t} 
+            onClick={() => setActiveTab(t)} 
+            className={`flex items-center gap-2 px-6 py-2.5 text-sm font-bold transition-all border-r border-[#ccc] ${
+              activeTab === t 
+              ? 'bg-white text-[#185baf] border-t-2 border-t-[#185baf] shadow-inner' 
+              : 'text-[#666] hover:bg-[#e6e6e6] border-t-2 border-t-transparent'
+            }`}
+          >
+            <span className={activeTab === t ? 'text-[#185baf]' : 'text-[#666]'}>
+              {getIcon(t)}
+            </span>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pb-12 items-start mt-2">
+        <div className="lg:col-span-8 space-y-4">
+          <div className="bg-white border border-[#ccc] shadow-sm">
+             <div className="p-3 border-b border-[#ccc] bg-[#f0f0f0] flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-[#185baf]" />
+                  <h3 className="text-sm font-bold text-[#333] uppercase tracking-wide">
+                    Active {activeTab} Registry
+                    <span className="ml-2 text-[#666] font-medium text-xs">({currentData.length})</span>
+                  </h3>
+                </div>
+                <button 
+                  onClick={() => { setActiveImportType(activeTab); fileInputRef.current?.click(); }}
+                  className="btn-primary flex items-center gap-2 py-1.5 px-4 text-xs shadow-sm hover:shadow"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Bulk Import
+                </button>
+             </div>
+             
+             <div className="overflow-x-auto">
+                <div className="max-h-[500px] overflow-y-auto">
+                   <table className="w-full text-left bg-white border-collapse">
+                     <thead className="bg-[#f9f9f9] sticky top-0 z-10 border-b border-[#ccc] divide-x divide-[#eee]">
+                       {renderTableHeaders()}
+                     </thead>
+                     <tbody className="divide-y divide-[#eee]">
+                       {renderTableRows()}
+                       {currentData.length === 0 && (
+                         <tr>
+                           <td colSpan={6} className="px-3 py-12 text-center bg-[#fcfcfc]">
+                             <div className="flex flex-col items-center justify-center h-full opacity-50">
+                               <Database className="w-8 h-8 text-[#999] mb-3" />
+                               <p className="text-[#333] font-bold uppercase text-[11px] tracking-wide">No records found in this category</p>
+                               <p className="text-xs text-[#666] mt-1 text-center max-w-xs leading-tight">Use the Manual Entry form or Bulk Import {activeTab} to populate the registry.</p>
+                             </div>
+                           </td>
+                         </tr>
+                       )}
+                     </tbody>
+                   </table>
+                </div>
+             </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-4 space-y-6">
+          <div className="bg-[#f0f0f0] border border-[#ccc] shadow-sm">
+             <div className="bg-[#185baf] text-white px-3 py-2 flex items-center gap-2">
+                <Plus className="w-4 h-4" />
+                <h3 className="font-bold text-[13px] tracking-wide uppercase">Manual Entry</h3>
+             </div>
+             
+             <div className="p-4 bg-white border-b border-[#ccc]">
+                {renderManualEntryForm()}
+
+                <button 
+                  onClick={addNewItem} 
+                  className="w-full btn-primary py-2 mt-5 flex items-center justify-center gap-2 font-bold uppercase text-xs hover:shadow-md transition-shadow"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add to Registry
+                </button>
+             </div>
+          </div>
+          
+          <div className="bg-[#f0f0f0] border border-[#ccc] shadow-sm mt-4">
+             <div className="bg-[#555] text-white px-3 py-2 flex items-center gap-2">
+                <Download className="w-4 h-4" />
+                <h4 className="font-bold text-[13px] uppercase tracking-wide">Import Templates</h4>
+             </div>
+             <div className="p-4 bg-white flex flex-col items-center">
+               <p className="text-[11px] text-[#555] mb-4 text-center leading-relaxed">
+                 Download strict CSV templates to ensure precise data mapping for bulk uploads. Mandatory variables are pre-filled.
+               </p>
+               <button 
+                onClick={() => {
+                  const csvContent = templates[activeTab];
+                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.setAttribute('href', url);
+                  link.setAttribute('download', `${activeTab.toLowerCase()}_template.csv`);
+                  link.click();
+                }} 
+                className="w-full btn-primary py-2.5 text-xs font-bold uppercase flex justify-center items-center gap-2 shadow-sm hover:shadow"
+               >
+                 <FileText className="w-4 h-4" />
+                 Get {activeTab} Template
+               </button>
+             </div>
+          </div>
+        </div>
+      </div>
+      <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept=".csv" />
+    </div>
+  );
+};
+
+export default DataImportPanel;

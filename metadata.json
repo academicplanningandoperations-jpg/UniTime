@@ -1,0 +1,5 @@
+{
+  "name": "UniTime: University Timetable Management System",
+  "description": "A professional-grade CELCAT-like timetable management system featuring real-time clash detection, multi-window views, and AI-powered scheduling suggestions.",
+  "requestFramePermissions": []
+}

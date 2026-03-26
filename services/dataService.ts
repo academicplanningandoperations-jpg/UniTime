@@ -64,7 +64,16 @@ export class DataService {
         }
 
         if (data.length > 0) {
-          const { error: insertError } = await supabase.from(tableName).insert(data);
+          // Sanitize data: Replace '-' with null for timestamp fields to avoid Postgres errors
+          const sanitizedData = data.map((item: any) => {
+            const newItem = { ...item };
+            if (tableName === 'users' && newItem.lastLogin === '-') {
+              newItem.lastLogin = null;
+            }
+            return newItem;
+          });
+
+          const { error: insertError } = await supabase.from(tableName).insert(sanitizedData);
           if (insertError) {
             console.error(`Failed to insert ${tableName} into Supabase:`, insertError);
             // Provide a more helpful error message

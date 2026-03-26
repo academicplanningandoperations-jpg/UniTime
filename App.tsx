@@ -256,6 +256,24 @@ const App: React.FC = () => {
     setIsSyncing(false);
   };
 
+  const handleFullSync = async () => {
+    setIsSyncing(true);
+    try {
+      // Sync in order to satisfy foreign keys
+      await DataService.saveEntity('terms', 'unitime_terms', terms);
+      await DataService.saveEntity('users', 'unitime_users', users);
+      await DataService.saveEntity('courses', 'unitime_courses', courses);
+      await DataService.saveEntity('faculties', 'unitime_faculties', faculties);
+      await DataService.saveEntity('rooms', 'unitime_rooms', rooms);
+      await DataService.saveEntity('groups', 'unitime_groups', groups);
+      await DataService.saveEntries(schedule);
+      alert('Full System Sync Successful! All local data is now mirror-synced to Supabase.');
+    } catch (err: any) {
+      alert('Full Sync Failed: ' + (err.message || 'Unknown error during sequential migration.'));
+    }
+    setIsSyncing(false);
+  };
+
   const handleExportPDF = async () => {
     setIsSyncing(true);
     try {
@@ -538,7 +556,7 @@ const App: React.FC = () => {
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} />}
           {activeTab === 'terms' && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
           {activeTab === 'data' && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} />}
-          {activeTab === 'admin' && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} />}
+          {activeTab === 'admin' && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} />}
         </div>
       </main>
 

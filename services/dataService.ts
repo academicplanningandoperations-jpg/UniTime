@@ -63,12 +63,14 @@ export class DataService {
           // We don't stop here, try to insert anyway or handle as needed
         }
 
-        if (data.length > 0) {
-          // Sanitize data: Replace '-' with null for timestamp fields to avoid Postgres errors
+          // Sanitize data: Ensure timestamp fields are null if invalid
           const sanitizedData = data.map((item: any) => {
             const newItem = { ...item };
-            if (tableName === 'users' && newItem.lastLogin === '-') {
-              newItem.lastLogin = null;
+            if (tableName === 'users') {
+              // If lastLogin exists but isn't a valid ISO date, set to null
+              if (newItem.lastLogin && (newItem.lastLogin === '-' || newItem.lastLogin.length < 10)) {
+                newItem.lastLogin = null;
+              }
             }
             return newItem;
           });
@@ -82,10 +84,9 @@ export class DataService {
           } else {
             console.log(`Successfully synced ${tableName} to Supabase.`);
           }
+        } catch (err) {
+          console.error(`Unexpected error syncing ${tableName}:`, err);
         }
-      } catch (err) {
-        console.error(`Unexpected error syncing ${tableName}:`, err);
-      }
     }
     localStorage.setItem(storageKey, JSON.stringify(data));
   }

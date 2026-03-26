@@ -25,9 +25,10 @@ interface AdminPanelProps {
   users: UserAccount[];
   onUpdateUsers: (users: UserAccount[]) => void;
   currentUser: UserAccount;
+  onFullSync: () => Promise<void>;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, onFullSync }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -384,13 +385,20 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
                    />
                 </div>
 
-                <div className="pt-2">
+                <div className="pt-2 space-y-2">
                   <button 
                     onClick={saveBackendConfig}
                     className="btn-primary w-full py-2 flex items-center justify-center gap-2 shadow-[2px_2px_0_#00479b]"
                   >
                      {syncStatus === 'saved' ? <CheckCircle2 className="w-4 h-4" /> : <Save className="w-4 h-4" />}
                      {syncStatus === 'saved' ? 'CREDENTIALS APPLIED' : 'BIND CONNECTION'}
+                  </button>
+
+                  <button 
+                    onClick={onFullSync}
+                    className="w-full py-2 bg-[#f0f0f0] border-2 border-[#185baf] text-[#185baf] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white transition-colors"
+                  >
+                     <CloudLightning className="w-4 h-4" /> REPAIR DATABASE CONNECTIONS
                   </button>
                 </div>
              </div>

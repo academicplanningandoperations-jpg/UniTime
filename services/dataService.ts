@@ -63,15 +63,35 @@ export class DataService {
           // We don't stop here, try to insert anyway or handle as needed
         }
 
-          // Sanitize data: Ensure timestamp fields are null if invalid
+          // Sanitize data: Remove underscore-prefixed metadata and ensure schema compliance
           const sanitizedData = data.map((item: any) => {
-            const newItem = { ...item };
+            const newItem: any = {};
+            
+            // 1. Generic filtering of underscore-prefixed metadata fields (added during CSV import)
+            Object.keys(item).forEach(key => {
+              if (!key.startsWith('_')) {
+                newItem[key] = item[key];
+              }
+            });
+
+            // 2. Specific table mappings and sanitization
             if (tableName === 'users') {
               // If lastLogin exists but isn't a valid ISO date, set to null
               if (newItem.lastLogin && (newItem.lastLogin === '-' || newItem.lastLogin.length < 10)) {
                 newItem.lastLogin = null;
               }
+            } else if (tableName === 'courses') {
+              // 'academicYear' and 'Semester' are added for UI/Mapping but aren't in the DB schema for courses
+              delete newItem.academicYear;
+              delete newItem.semester;
+              delete newItem.Semester;
+            } else if (tableName === 'faculties') {
+              // In case any extra fields like 'email' (from CSV) were added to Faculty object
+              // Note: types.ts Faculty doesn't have email, but UserAccount does.
+              // DB faculties table: id, name, department, availability, "maxHoursPerWeek"
+              // We'll keep it simple for now, as _ fields are already gone.
             }
+            
             return newItem;
           });
 

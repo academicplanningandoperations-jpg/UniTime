@@ -63,33 +63,33 @@ export class DataService {
           // We don't stop here, try to insert anyway or handle as needed
         }
 
-          // Sanitize data: Remove underscore-prefixed metadata and ensure schema compliance
+          // 2. Strict Whitelist Sanitization: Only allow keys that exist in the database schema
+          const TABLE_SCHEMAS: Record<string, string[]> = {
+            users: ['id', 'username', 'password', 'name', 'role', 'departmentScope', 'lastLogin'],
+            terms: ['id', 'name', 'startDate', 'endDate', 'academicYear', 'isActive'],
+            courses: ['id', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
+            faculties: ['id', 'name', 'department', 'availability', 'maxHoursPerWeek'],
+            rooms: ['id', 'name', 'capacity', 'type'],
+            groups: ['id', 'name', 'program', 'semester', 'studentCount'],
+            schedule: ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category']
+          };
+
           const sanitizedData = data.map((item: any) => {
+            const schema = TABLE_SCHEMAS[tableName];
+            if (!schema) return item; // Fallback for unknown tables
+
             const newItem: any = {};
-            
-            // 1. Generic filtering of underscore-prefixed metadata fields (added during CSV import)
-            Object.keys(item).forEach(key => {
-              if (!key.startsWith('_')) {
+            schema.forEach(key => {
+              if (item[key] !== undefined) {
                 newItem[key] = item[key];
               }
             });
 
-            // 2. Specific table mappings and sanitization
-            if (tableName === 'users') {
-              // If lastLogin exists but isn't a valid ISO date, set to null
-              if (newItem.lastLogin && (newItem.lastLogin === '-' || newItem.lastLogin.length < 10)) {
+            // Specific user sanitization
+            if (tableName === 'users' && newItem.lastLogin) {
+              if (newItem.lastLogin === '-' || newItem.lastLogin.length < 10) {
                 newItem.lastLogin = null;
               }
-            } else if (tableName === 'courses') {
-              // 'academicYear' and 'Semester' are added for UI/Mapping but aren't in the DB schema for courses
-              delete newItem.academicYear;
-              delete newItem.semester;
-              delete newItem.Semester;
-            } else if (tableName === 'faculties') {
-              // In case any extra fields like 'email' (from CSV) were added to Faculty object
-              // Note: types.ts Faculty doesn't have email, but UserAccount does.
-              // DB faculties table: id, name, department, availability, "maxHoursPerWeek"
-              // We'll keep it simple for now, as _ fields are already gone.
             }
             
             return newItem;

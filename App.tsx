@@ -71,23 +71,28 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       setIsSyncing(true);
-      const [u, t, c, f, r, g, s] = await Promise.all([
-        DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
-        DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS),
-        DataService.loadEntity<Course>('courses', 'unitime_courses', MOCK_COURSES),
-        DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', MOCK_FACULTY),
-        DataService.loadEntity<Room>('rooms', 'unitime_rooms', MOCK_ROOMS),
-        DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', MOCK_GROUPS),
-        DataService.loadAllEntries()
-      ]);
-      setUsers(u);
-      setTerms(t);
-      setCourses(c);
-      setFaculties(f);
-      setRooms(r);
-      setGroups(g);
-      setSchedule(s);
-      setIsSyncing(false);
+      try {
+        const [u, t, c, f, r, g, s] = await Promise.all([
+          DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
+          DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS),
+          DataService.loadEntity<Course>('courses', 'unitime_courses', MOCK_COURSES),
+          DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', MOCK_FACULTY),
+          DataService.loadEntity<Room>('rooms', 'unitime_rooms', MOCK_ROOMS),
+          DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', MOCK_GROUPS),
+          DataService.loadAllEntries()
+        ]);
+        setUsers(u);
+        setTerms(t);
+        setCourses(c);
+        setFaculties(f);
+        setRooms(r);
+        setGroups(g);
+        setSchedule(s);
+      } catch (err) {
+        console.error('Initial data loading failed:', err);
+      } finally {
+        setIsSyncing(false);
+      }
     };
     loadData();
 

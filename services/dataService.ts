@@ -8,10 +8,14 @@ export class DataService {
   private static STORAGE_KEY = 'unitime_full_dataset';
 
   static async loadAllEntries(): Promise<ScheduleEntry[]> {
-    if (supabase) {
-      const { data, error } = await supabase.from('schedule').select('*');
-      if (!error && data) return data;
-      console.warn('Falling back to local storage due to Supabase error:', error);
+    try {
+      if (supabase) {
+        const { data, error } = await supabase.from('schedule').select('*');
+        if (!error && data) return data;
+        if (error) console.warn('Supabase select error:', error);
+      }
+    } catch (err) {
+      console.error('DataService.loadAllEntries crash:', err);
     }
 
     const saved = localStorage.getItem(this.STORAGE_KEY);
@@ -19,19 +23,23 @@ export class DataService {
   }
 
   static async saveEntries(entries: ScheduleEntry[]): Promise<void> {
-    if (supabase) {
-      console.log('Syncing schedule to Supabase...', entries);
-      const { error: deleteError } = await supabase.from('schedule').delete().neq('id', '0');
-      if (deleteError) {
-        console.error('Failed to clear schedule in Supabase:', deleteError);
+    try {
+      if (supabase) {
+        console.log('Syncing schedule to Supabase...', entries);
+        const { error: deleteError } = await supabase.from('schedule').delete().neq('id', '0');
+        if (deleteError) {
+          console.error('Failed to clear schedule in Supabase:', deleteError);
+        }
+        const { error: insertError } = await supabase.from('schedule').insert(entries);
+        if (insertError) {
+          console.error('Failed to sync schedule with Supabase:', insertError);
+          alert(`Supabase Error (Schedule): ${insertError.message}. Check if table "schedule" exists.`);
+        } else {
+          console.log('Successfully synced schedule to Supabase.');
+        }
       }
-      const { error: insertError } = await supabase.from('schedule').insert(entries);
-      if (insertError) {
-        console.error('Failed to sync schedule with Supabase:', insertError);
-        alert(`Supabase Error (Schedule): ${insertError.message}. Check if table "schedule" exists.`);
-      } else {
-        console.log('Successfully synced schedule to Supabase.');
-      }
+    } catch (err) {
+      console.error('DataService.saveEntries crash:', err);
     }
 
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(entries));
@@ -41,72 +49,78 @@ export class DataService {
    * Generic methods for other entities
    */
   static async loadEntity<T>(tableName: string, storageKey: string, defaultValue: T[]): Promise<T[]> {
-    if (supabase) {
-      const { data, error } = await supabase.from(tableName).select('*');
-      if (!error && data && data.length > 0) return data as T[];
+    try {
+      if (supabase) {
+        const { data, error } = await supabase.from(tableName).select('*');
+        if (!error && data && data.length > 0) return data as T[];
+        if (error) console.warn(`Supabase load error for ${tableName}:`, error);
+      }
+    } catch (err) {
+      console.error(`DataService.loadEntity(${tableName}) crash:`, err);
     }
+    
     const saved = localStorage.getItem(storageKey);
-    return saved ? JSON.parse(saved) : defaultValue;
+    try {
+      return saved ? JSON.parse(saved) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
   }
 
   static async saveEntity<T>(tableName: string, storageKey: string, data: T[]): Promise<void> {
-    if (supabase) {
-      try {
+    try {
+      if (supabase) {
         console.log(`Syncing ${tableName} to Supabase...`, data);
         
-        // Use a more robust way to delete all records
-        // .delete().neq('id', '_non_existent_id_') is generally safe for text/uuid/int
+        // 1. Clear existing data
         const { error: deleteError } = await supabase.from(tableName).delete().not('id', 'is', null);
-        
         if (deleteError) {
           console.error(`Failed to clear ${tableName} in Supabase:`, deleteError);
-          // We don't stop here, try to insert anyway or handle as needed
         }
 
-          // 2. Safe Sanitization: Filter out metadata and known conflicting fields
-          const sanitizedData = data.map((item: any) => {
-            // Create a copy to avoid mutating the local state used for the UI
-            const newItem = { ...item };
-            
-            // Remove internal metadata prefixed with underscore
-            Object.keys(newItem).forEach(key => {
-              if (key.startsWith('_')) {
-                delete (newItem as any)[key];
-              }
-            });
+        // 2. Strict Whitelist Sanitization (to prevent Supabase "column not found" errors)
+        const SCHEMA_WHITELIST: Record<string, string[]> = {
+          users: ['id', 'username', 'password', 'name', 'role', 'departmentScope', 'lastLogin'],
+          terms: ['id', 'name', 'startDate', 'endDate', 'academicYear', 'isActive'],
+          courses: ['id', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
+          faculties: ['id', 'name', 'department', 'availability', 'maxHoursPerWeek'],
+          rooms: ['id', 'name', 'capacity', 'type'],
+          groups: ['id', 'name', 'program', 'semester', 'studentCount'],
+          schedule: ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category']
+        };
 
-            // Specific table sanitization for known incompatible fields
-            if (tableName === 'courses') {
-              // These fields are for UI/templates and shouldn't go to the Supabase courses table
-              delete (newItem as any).academicYear;
-              delete (newItem as any).semester;
-              delete (newItem as any).Semester;
-            } else if (tableName === 'faculties') {
-              // 'email' was added for UI but is not in the database schema for faculties
-              delete (newItem as any).email;
-            } else if (tableName === 'users' && (newItem as any).lastLogin) {
-              // Standardize lastLogin timestamp
-              if ((newItem as any).lastLogin === '-' || (newItem as any).lastLogin.length < 10) {
-                (newItem as any).lastLogin = null;
-              }
-            }
-            
-            return newItem;
+        const sanitizedData = data.map((item: any) => {
+          const schema = SCHEMA_WHITELIST[tableName] || [];
+          if (schema.length === 0) return item; // If table not in whitelist, send as-is (risky)
+
+          const newItem: any = {};
+          schema.forEach(key => {
+            if (item[key] !== undefined) newItem[key] = item[key];
           });
 
-          const { error: insertError } = await supabase.from(tableName).insert(sanitizedData);
-          if (insertError) {
-            console.error(`Failed to insert ${tableName} into Supabase:`, insertError);
-            // Provide a more helpful error message
-            const msg = `Supabase Sync Error (${tableName}): ${insertError.message}\n\nProbable causes:\n1. Table "${tableName}" does not exist.\n2. Column names don't match (check "departmentScope" vs "department_scope").\n3. RLS policies are blocking the write.`;
-            alert(msg);
-          } else {
-            console.log(`Successfully synced ${tableName} to Supabase.`);
+          // Special case: Ensure lastLogin is a valid timestamp or null
+          if (tableName === 'users' && newItem.lastLogin) {
+            if (newItem.lastLogin === '-' || newItem.lastLogin.length < 5) newItem.lastLogin = null;
           }
-        } catch (err) {
-          console.error(`Unexpected error syncing ${tableName}:`, err);
+
+          return newItem;
+        });
+
+        // 3. Batch Insert
+        const { error: insertError } = await supabase.from(tableName).insert(sanitizedData);
+        if (insertError) {
+          console.error(`Failed to insert ${tableName} into Supabase:`, insertError);
+          const msg = `Supabase Sync Error (${tableName}): ${insertError.message}\n\nPlease check your CSV headers/schema.`;
+          alert(msg);
+        } else {
+          console.log(`Successfully synced ${tableName} to Supabase.`);
         }
+      }
+    } catch (err) {
+      console.error(`Unexpected crash syncing ${tableName}:`, err);
     }
+    
+    // Always persist to local storage regardless of Supabase status
     localStorage.setItem(storageKey, JSON.stringify(data));
   }
 

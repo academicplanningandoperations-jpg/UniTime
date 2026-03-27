@@ -63,32 +63,31 @@ export class DataService {
           // We don't stop here, try to insert anyway or handle as needed
         }
 
-          // 2. Strict Whitelist Sanitization: Only allow keys that exist in the database schema
-          const TABLE_SCHEMAS: Record<string, string[]> = {
-            users: ['id', 'username', 'password', 'name', 'role', 'departmentScope', 'lastLogin'],
-            terms: ['id', 'name', 'startDate', 'endDate', 'academicYear', 'isActive'],
-            courses: ['id', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
-            faculties: ['id', 'name', 'department', 'availability', 'maxHoursPerWeek'],
-            rooms: ['id', 'name', 'capacity', 'type'],
-            groups: ['id', 'name', 'program', 'semester', 'studentCount'],
-            schedule: ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category']
-          };
-
+          // 2. Safe Sanitization: Filter out metadata and known conflicting fields
           const sanitizedData = data.map((item: any) => {
-            const schema = TABLE_SCHEMAS[tableName];
-            if (!schema) return item; // Fallback for unknown tables
-
-            const newItem: any = {};
-            schema.forEach(key => {
-              if (item[key] !== undefined) {
-                newItem[key] = item[key];
+            // Create a copy to avoid mutating the local state used for the UI
+            const newItem = { ...item };
+            
+            // Remove internal metadata prefixed with underscore
+            Object.keys(newItem).forEach(key => {
+              if (key.startsWith('_')) {
+                delete (newItem as any)[key];
               }
             });
 
-            // Specific user sanitization
-            if (tableName === 'users' && newItem.lastLogin) {
-              if (newItem.lastLogin === '-' || newItem.lastLogin.length < 10) {
-                newItem.lastLogin = null;
+            // Specific table sanitization for known incompatible fields
+            if (tableName === 'courses') {
+              // These fields are for UI/templates and shouldn't go to the Supabase courses table
+              delete (newItem as any).academicYear;
+              delete (newItem as any).semester;
+              delete (newItem as any).Semester;
+            } else if (tableName === 'faculties') {
+              // 'email' was added for UI but is not in the database schema for faculties
+              delete (newItem as any).email;
+            } else if (tableName === 'users' && (newItem as any).lastLogin) {
+              // Standardize lastLogin timestamp
+              if ((newItem as any).lastLogin === '-' || (newItem as any).lastLogin.length < 10) {
+                (newItem as any).lastLogin = null;
               }
             }
             

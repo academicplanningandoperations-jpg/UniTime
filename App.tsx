@@ -60,7 +60,6 @@ const App: React.FC = () => {
     return !!supabase || isSkipped;
   });
 
-
   const [viewingTermId, setViewingTermId] = useState<string | null>(null);
 
   const [users, setUsers] = useState<UserAccount[]>(MOCK_USERS);
@@ -75,6 +74,13 @@ const App: React.FC = () => {
 
   // Clipboard for copy-paste
   const [clipboard, setClipboard] = useState<Partial<ScheduleEntry> | null>(null);
+
+  // ✅ FIX: effectiveActiveTerm moved here, BEFORE the useEffect that references it.
+  // Previously it was declared after the hooks (line 543), causing a
+  // "Cannot access before initialization" crash in the bundled output.
+  const effectiveActiveTerm = viewingTermId
+    ? terms.find(t => t.id === viewingTermId)
+    : terms.find(t => t.isActive);
 
   useEffect(() => {
     const loadData = async () => {
@@ -539,10 +545,6 @@ const App: React.FC = () => {
       window.location.reload();
     }} />;
   }
-
-  const effectiveActiveTerm = viewingTermId 
-    ? terms.find(t => t.id === viewingTermId) 
-    : terms.find(t => t.isActive);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden relative">

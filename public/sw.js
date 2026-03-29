@@ -40,29 +40,52 @@ self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
+  const url = new URL(event.request.url);
+
+  // Network-First for Navigation (the main page)
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            return response;
+          }
+          return caches.match(event.request);
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Cache-First with Network Fallback for assets
   event.respondWith(
     (async () => {
       try {
-        // 1. Try to find in cache
         const cachedResponse = await caches.match(event.request);
         if (cachedResponse) {
-          return cachedResponse;
+          // Verify it's not a 404 cached previously (though we shouldn't cache 404s)
+          if (cachedResponse.status === 200) return cachedResponse;
         }
 
-        // 2. Not in cache, try network
-        return await fetch(event.request);
+        const networkResponse = await fetch(event.request);
+        
+        // Only cache successful responses
+        if (networkResponse && networkResponse.status === 200) {
+          const cache = await caches.open(CACHE_NAME);
+          cache.put(event.request, networkResponse.clone());
+        }
+        
+        return networkResponse;
       } catch (error) {
         console.error('[SW] Fetch failed for:', event.request.url, error);
         
-        // 3. Last resort: If fetch fails (network error), just try to fetch again bypassing SW
-        // or return the cached version if possible.
-        // For navigation requests, we should at least serve index.html if possible
-        if (event.request.mode === 'navigate') {
-          const cache = await caches.open(CACHE_NAME);
-          return (await cache.match('/index.html')) || (await fetch(event.request));
+        // If it's a script failure, we might want to trigger a reload or show an error
+        if (event.request.destination === 'script') {
+          console.warn('[SW] Script failed to load, potentially a stale hash issue.');
         }
-        
-        // Final fallback: just let the browser handle it if we can
+
         return fetch(event.request);
       }
     })()

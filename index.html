@@ -8,10 +8,62 @@
     <link rel="stylesheet" href="/index.css">
     <link rel="manifest" href="/manifest.json">
 </head>
-<body class="bg-slate-50 text-slate-900">
+<body class="bg-[#0f172a] text-slate-900">
+    <!-- Fail-safe Recovery Button (only visible if React fails to load) -->
+    <div id="recovery-portal" class="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-[#0f172a]" style="display: none;">
+      <div class="max-w-md w-full bg-[#1e293b] border-2 border-blue-500 p-8 shadow-2xl text-center">
+        <h1 class="text-xl font-black uppercase tracking-tighter text-blue-500 mb-4">System Recovery Required</h1>
+        <p class="text-[10px] text-slate-400 mb-6 font-bold leading-relaxed uppercase tracking-wider">
+          The application is trapped in an old browser cache. Press below to force a clean update.
+        </p>
+        <button 
+          onclick="forceSystemReset()"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 uppercase tracking-widest text-[10px] transition-all shadow-[4px_4px_0_rgba(0,0,0,0.3)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
+        >
+          Force Clean Update & Reload
+        </button>
+      </div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
     <script>
+      function forceSystemReset() {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(registrations => {
+            for(let registration of registrations) {
+              registration.unregister();
+            }
+            caches.keys().then(keys => {
+              for(let key of keys) caches.delete(key);
+              localStorage.clear();
+              window.location.href = window.location.origin + '?t=' + Date.now();
+            });
+          });
+        } else {
+          localStorage.clear();
+          window.location.reload(true);
+        }
+      }
+
+      // Show recovery button if app doesn't load within 5 seconds
+      const recoveryTimer = setTimeout(() => {
+        const root = document.getElementById('root');
+        if (!root || !root.hasChildNodes()) {
+          document.getElementById('recovery-portal').style.display = 'flex';
+        }
+      }, 5000);
+
+      // Hide recovery button if React successfully mounts
+      const observer = new MutationObserver(() => {
+        const root = document.getElementById('root');
+        if (root && root.hasChildNodes()) {
+          document.getElementById('recovery-portal').style.display = 'none';
+          clearTimeout(recoveryTimer);
+          observer.disconnect();
+        }
+      });
+      observer.observe(document.getElementById('root'), { childList: true });
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then((registration) => {

@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { supabase } from '../services/supabase';
 import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { Course, Faculty, Room, StudentGroup } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -151,13 +152,37 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     if (type === 'Groups') onUploadGroups(groups.filter(g => g.id !== id));
   };
 
-  const clearAllData = () => {
-    if (confirm(`Delete ALL ${activeTab} for term "${activeTermName || activeTermId}"? Other terms are not affected.`)) {
-      if (activeTab === 'Modules') onUploadCourses(courses.filter((c: any) => c.termId !== activeTermId));
-      if (activeTab === 'Faculties') onUploadFaculties(faculties.filter((f: any) => f.termId !== activeTermId));
-      if (activeTab === 'Rooms') onUploadRooms(rooms.filter((r: any) => r.termId !== activeTermId));
-      if (activeTab === 'Groups') onUploadGroups(groups.filter((g: any) => g.termId !== activeTermId));
+  const clearAllData = async () => {
+    if (!confirm(`Delete ALL ${activeTab} for term "${activeTermName || activeTermId}"? Other terms are not affected.`)) return;
+
+    // Table name map
+    const tableMap: Record<string, string> = {
+      Modules: 'courses',
+      Faculties: 'faculties',
+      Rooms: 'rooms',
+      Groups: 'groups'
+    };
+    const tableName = tableMap[activeTab];
+
+    // ✅ FIX: Delete from Supabase first, scoped to this term only
+    if (supabase && activeTermId) {
+      const { error } = await supabase
+        .from(tableName)
+        .delete()
+        .eq('termId', activeTermId);
+      if (error) {
+        console.error(`Failed to wipe ${tableName} from Supabase:`, error);
+        alert(`Supabase wipe failed: ${error.message}`);
+        return; // Don't clear local state if Supabase failed
+      }
+      console.log(`Wiped ${tableName} for term ${activeTermId} from Supabase.`);
     }
+
+    // ✅ Then clear from local state (keeping other terms intact)
+    if (activeTab === 'Modules') onUploadCourses(courses.filter((c: any) => c.termId !== activeTermId));
+    if (activeTab === 'Faculties') onUploadFaculties(faculties.filter((f: any) => f.termId !== activeTermId));
+    if (activeTab === 'Rooms') onUploadRooms(rooms.filter((r: any) => r.termId !== activeTermId));
+    if (activeTab === 'Groups') onUploadGroups(groups.filter((g: any) => g.termId !== activeTermId));
   };
 
   const addNewItem = () => {

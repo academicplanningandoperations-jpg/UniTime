@@ -75,6 +75,10 @@ const App: React.FC = () => {
   // Clipboard for copy-paste
   const [clipboard, setClipboard] = useState<Partial<ScheduleEntry> | null>(null);
 
+  // ✅ FIX: A ref that mirrors isSyncing for use inside realtime callbacks.
+  // Regular state can't be read inside closures reliably; refs can.
+  const isSyncingRef = useRef(false);
+
   // ✅ FIX: effectiveActiveTerm moved here, BEFORE the useEffect that references it.
   // Previously it was declared after the hooks (line 543), causing a
   // "Cannot access before initialization" crash in the bundled output.
@@ -112,36 +116,46 @@ const App: React.FC = () => {
     loadData();
 
     // Real-time Multi-user Synchronization
+    // ✅ FIX: Use a ref to track syncing state inside the realtime callback
+    // so we never overwrite state while a save is in progress.
+    // Also removed MOCK_* fallbacks — realtime should never inject demo data.
     if (supabase) {
       const termId = effectiveActiveTerm?.id;
       const channel = supabase.channel('realtime_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
+          if (isSyncingRef.current) return; // ✅ ignore while we are saving
           const s = await DataService.loadAllEntries(termId);
           setSchedule(s);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async () => {
+          if (isSyncingRef.current) return;
           const u = await DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS);
           setUsers(u);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'terms' }, async () => {
+          if (isSyncingRef.current) return;
           const t = await DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS);
           setTerms(t);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
-          const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', MOCK_COURSES, termId);
-          setCourses(c);
+          if (isSyncingRef.current) return; // ✅ ignore — upload just fired this
+          const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId);
+          if (c.length > 0) setCourses(c); // ✅ never overwrite with empty
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
-          const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', MOCK_FACULTY, termId);
-          setFaculties(f);
+          if (isSyncingRef.current) return;
+          const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId);
+          if (f.length > 0) setFaculties(f);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
-          const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', MOCK_ROOMS, termId);
-          setRooms(r);
+          if (isSyncingRef.current) return;
+          const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId);
+          if (r.length > 0) setRooms(r);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
-          const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', MOCK_GROUPS, termId);
-          setGroups(g);
+          if (isSyncingRef.current) return;
+          const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId);
+          if (g.length > 0) setGroups(g);
         })
         .subscribe();
 
@@ -150,6 +164,11 @@ const App: React.FC = () => {
       };
     }
   }, []);
+
+  // ✅ FIX: Keep isSyncingRef in sync with isSyncing state
+  useEffect(() => {
+    isSyncingRef.current = isSyncing;
+  }, [isSyncing]);
 
   useEffect(() => {
     if (currentUser) {

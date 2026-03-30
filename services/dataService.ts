@@ -153,6 +153,45 @@ export class DataService {
     }
   }
 
+  // ── Supabase-only reads (used in realtime callbacks) ────────────────────────
+  // These never fall back to localStorage. If Supabase is unavailable or returns
+  // an error they return null, so callers can skip the state update and keep the
+  // current (correct) state rather than overwriting it with stale/mock data.
+
+  static async loadFromSupabaseOnly<T>(tableName: string, termId?: string): Promise<T[] | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await this.fetchAllPages<T>((from, to) => {
+        let q = supabase!.from(tableName).select('*').range(from, to);
+        if (termId && tableName !== 'users' && tableName !== 'terms') {
+          q = q.eq('termId', termId);
+        }
+        return q;
+      });
+      if (error) { console.warn(`loadFromSupabaseOnly(${tableName}) error:`, error); return null; }
+      return data as T[];
+    } catch (err) {
+      console.error(`loadFromSupabaseOnly(${tableName}) crash:`, err);
+      return null;
+    }
+  }
+
+  static async loadAllEntriesFromSupabase(termId?: string): Promise<ScheduleEntry[] | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await this.fetchAllPages<ScheduleEntry>((from, to) => {
+        let q = supabase!.from('schedule').select('*').range(from, to);
+        if (termId) q = q.eq('termId', termId);
+        return q;
+      });
+      if (error) { console.warn('loadAllEntriesFromSupabase error:', error); return null; }
+      return data;
+    } catch (err) {
+      console.error('loadAllEntriesFromSupabase crash:', err);
+      return null;
+    }
+  }
+
   // Wipe all schedule entries for a term (or all terms if no termId).
   // Used by admin "Clear Schedule" — does NOT call saveEntries so it won't
   // re-upload the old full array; it just deletes the rows directly.

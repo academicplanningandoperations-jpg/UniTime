@@ -188,49 +188,55 @@ const App: React.FC = () => {
         }, 3000);
       };
 
+      // ── Realtime callbacks use Supabase-only reads (no localStorage fallback). ──
+      // If Supabase is temporarily unavailable the method returns null and we skip
+      // the state update — current state stays intact rather than being overwritten
+      // with stale localStorage data or MOCK data (which would set activeTermIdRef
+      // to 't1' and cause every subsequent query to return empty results).
       const channel = supabase.channel('realtime_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
           debouncedRefresh('schedule', async () => {
-            const s = await DataService.loadAllEntries(activeTermIdRef.current);
-            setScheduleAndRef(s);
+            const s = await DataService.loadAllEntriesFromSupabase(activeTermIdRef.current);
+            if (s !== null) setScheduleAndRef(s);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async () => {
           debouncedRefresh('users', async () => {
-            const u = await DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS);
-            setUsers(u);
+            const u = await DataService.loadFromSupabaseOnly<UserAccount>('users');
+            if (u !== null && u.length > 0) setUsers(u);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'terms' }, async () => {
           debouncedRefresh('terms', async () => {
-            const t = await DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS);
-            if (t.length > 0) setTerms(t);
+            const t = await DataService.loadFromSupabaseOnly<Term>('terms');
+            // Guard: only update if Supabase returned real terms — never let a
+            // Supabase failure revert terms to MOCK_TERMS (which would break
+            // activeTermIdRef and cause all data to appear empty).
+            if (t !== null && t.length > 0) setTerms(t);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
           debouncedRefresh('courses', async () => {
-            // ✅ FIX: Always apply the update — removed "if (c.length > 0)" guard
-            // that was preventing genuine wipes from propagating to other users' screens.
-            const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', [], activeTermIdRef.current);
-            setCourses(c);
+            const c = await DataService.loadFromSupabaseOnly<Course>('courses', activeTermIdRef.current);
+            if (c !== null) setCourses(c);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
           debouncedRefresh('faculties', async () => {
-            const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], activeTermIdRef.current);
-            setFaculties(f);
+            const f = await DataService.loadFromSupabaseOnly<Faculty>('faculties', activeTermIdRef.current);
+            if (f !== null) setFaculties(f);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
           debouncedRefresh('rooms', async () => {
-            const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], activeTermIdRef.current);
-            setRooms(r);
+            const r = await DataService.loadFromSupabaseOnly<Room>('rooms', activeTermIdRef.current);
+            if (r !== null) setRooms(r);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
           debouncedRefresh('groups', async () => {
-            const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], activeTermIdRef.current);
-            setGroups(g);
+            const g = await DataService.loadFromSupabaseOnly<StudentGroup>('groups', activeTermIdRef.current);
+            if (g !== null) setGroups(g);
           });
         })
         .subscribe();
@@ -298,6 +304,10 @@ const App: React.FC = () => {
       const updatedSchedule = [...scheduleRef.current, ...entries];
       setScheduleAndRef(updatedSchedule);
       await DataService.addEntries(entries, updatedSchedule);
+      // Confirm from Supabase — ensures entries are really persisted and catches
+      // silent upsert failures (e.g. Supabase free-tier connection limits).
+      const confirmed = await DataService.loadAllEntriesFromSupabase(effectiveActiveTerm?.id);
+      if (confirmed !== null) setScheduleAndRef(confirmed);
     });
   };
 
@@ -366,6 +376,10 @@ const App: React.FC = () => {
     await withSync(async () => {
       setCourses(updatedCourses);
       await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id);
+      // Confirm: re-read from Supabase immediately so the UI reflects what was
+      // actually committed, catching any silent batch failures.
+      const confirmed = await DataService.loadFromSupabaseOnly<Course>('courses', effectiveActiveTerm?.id);
+      if (confirmed !== null) setCourses(confirmed);
     });
   };
 
@@ -373,6 +387,8 @@ const App: React.FC = () => {
     await withSync(async () => {
       setFaculties(updatedFaculties);
       await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id);
+      const confirmed = await DataService.loadFromSupabaseOnly<Faculty>('faculties', effectiveActiveTerm?.id);
+      if (confirmed !== null) setFaculties(confirmed);
     });
   };
 
@@ -380,6 +396,8 @@ const App: React.FC = () => {
     await withSync(async () => {
       setRooms(updatedRooms);
       await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id);
+      const confirmed = await DataService.loadFromSupabaseOnly<Room>('rooms', effectiveActiveTerm?.id);
+      if (confirmed !== null) setRooms(confirmed);
     });
   };
 
@@ -387,6 +405,8 @@ const App: React.FC = () => {
     await withSync(async () => {
       setGroups(updatedGroups);
       await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id);
+      const confirmed = await DataService.loadFromSupabaseOnly<StudentGroup>('groups', effectiveActiveTerm?.id);
+      if (confirmed !== null) setGroups(confirmed);
     });
   };
 

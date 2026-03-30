@@ -87,7 +87,7 @@ export class DataService {
             await supabase.from('schedule')
               .delete()
               .eq('termId', termId)
-              .not('id', 'in', `(${currentIds.map(id => `"${id}"`).join(',')})`);
+              .not('id', 'in', `(${currentIds.join(',')})`);
           } else {
             // All entries deleted for this term
             await supabase.from('schedule').delete().eq('termId', termId);
@@ -167,7 +167,6 @@ export class DataService {
 
       const sanitized = itemsToSync.map(item => this.sanitizeItem(tableName, item, termId));
 
-      // ✅ FIX: UPSERT — no delete+insert, no data loss, no unique constraint errors
       const { error: upsertError } = await supabase
         .from(tableName)
         .upsert(sanitized, { onConflict: 'id' });
@@ -184,13 +183,36 @@ export class DataService {
           } else {
             console.log(`${tableName} synced (without facultyId).`);
           }
-          return;
+        } else {
+          console.error(`Upsert failed for ${tableName}:`, upsertError);
+          alert(`Supabase Sync Error (${tableName}): ${upsertError.message}`);
         }
-        console.error(`Upsert failed for ${tableName}:`, upsertError);
-        alert(`Supabase Sync Error (${tableName}): ${upsertError.message}`);
       } else {
-        console.log(`${tableName} synced to Supabase.`);
+        console.log(`${tableName} upserted to Supabase.`);
       }
+
+      // ✅ FIX: Synchronization for DELETE.
+      // IDs present in Supabase but missing from our list should be removed.
+      const syncedIds = sanitized.map((item: any) => item.id);
+      let deleteQuery = supabase.from(tableName).delete();
+      
+      // Scoping the delete to avoid wiping data from other terms.
+      if (termId && tableName !== 'users' && tableName !== 'terms') {
+        deleteQuery = deleteQuery.eq('termId', termId);
+      }
+      
+      // If we have items left, exclude those IDs from deletion.
+      if (syncedIds.length > 0) {
+        // Postgrest syntax for NOT IN (...) — values must NOT be double-quoted
+        const { error: deleteError } = await deleteQuery.not('id', 'in', `(${syncedIds.join(',')})`);
+        if (deleteError) console.warn(`Delete sync error for ${tableName}:`, deleteError);
+      } else if (data.length === 0) {
+        // If the array is explicitly empty, and we are scoped to a term, delete everything for that term.
+        const { error: deleteAllError } = await deleteQuery;
+        if (deleteAllError) console.warn(`Full delete sync error for ${tableName}:`, deleteAllError);
+      }
+
+      console.log(`${tableName} synchronization complete.`);
     } catch (err) {
       console.error(`DataService.saveEntity(${tableName}) crash:`, err);
     }

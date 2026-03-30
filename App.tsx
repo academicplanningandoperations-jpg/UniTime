@@ -119,54 +119,60 @@ const App: React.FC = () => {
     if (supabase) {
       const termId = effectiveActiveTerm?.id;
       
-      // ✅ FIX: Simple debounce to avoid re-fetching while we are in the middle of a bulk upload event storm.
+      // ✅ FIX: Debounce ensures we don't spam the server with re-fetches during bulk operations.
+      // 2000ms delay provides a safer window for the database to achieve read-visibility.
       let debounceTimer: any = null;
-      const debouncedRefresh = (refreshFn: () => Promise<void>) => {
+      const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(async () => {
-          if (!isSyncingRef.current) await refreshFn();
-        }, 1000);
+          if (!isSyncingRef.current) {
+            console.log(`Refreshing ${tableName} from Supabase...`);
+            await refreshFn();
+          } else {
+            console.log(`Skipping refresh for ${tableName} (write in progress)`);
+          }
+        }, 2000);
       };
 
       const channel = supabase.channel('realtime_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
-          debouncedRefresh(async () => {
+          debouncedRefresh('schedule', async () => {
             const s = await DataService.loadAllEntries(termId);
             setSchedule(s);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async () => {
-          debouncedRefresh(async () => {
+          debouncedRefresh('users', async () => {
             const u = await DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS);
             setUsers(u);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'terms' }, async () => {
-          debouncedRefresh(async () => {
+          debouncedRefresh('terms', async () => {
             const t = await DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS);
             setTerms(t);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
-          debouncedRefresh(async () => {
+          debouncedRefresh('courses', async () => {
             const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId);
             if (c.length > 0) setCourses(c);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
-          debouncedRefresh(async () => {
+          debouncedRefresh('faculties', async () => {
             const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId);
             if (f.length > 0) setFaculties(f);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
-          debouncedRefresh(async () => {
+          debouncedRefresh('rooms', async () => {
             const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId);
             if (r.length > 0) setRooms(r);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
-          debouncedRefresh(async () => {
+          debouncedRefresh('groups', async () => {
             const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId);
             if (g.length > 0) setGroups(g);
           });
@@ -179,10 +185,19 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // ✅ FIX: Keep isSyncingRef in sync with isSyncing state
-  useEffect(() => {
-    isSyncingRef.current = isSyncing;
-  }, [isSyncing]);
+  // Helper: wraps any write operation so isSyncingRef blocks realtime re-fetches
+  // for the full debounce window (2s) + a safety buffer (1s extra = 3s total).
+  const withSync = async (fn: () => Promise<void>): Promise<void> => {
+    isSyncingRef.current = true;   // set immediately, not via React state
+    setIsSyncing(true);
+    try {
+      await fn();
+    } finally {
+      setIsSyncing(false);
+      // Keep blocking realtime re-fetches until the 2s debounce timer has expired
+      setTimeout(() => { isSyncingRef.current = false; }, 3000);
+    }
+  };
 
   useEffect(() => {
     if (currentUser) {
@@ -210,117 +225,113 @@ const App: React.FC = () => {
   const [maxZ, setMaxZ] = useState(12);
 
   const handleSaveSession = async (newEntries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => {
-    setIsSyncing(true);
-    
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
       id: `s-${Date.now()}-${index}`,
       departmentId: currentUser?.departmentScope === 'All' ? 'CS' : (currentUser?.departmentScope || 'General')
     }));
-
-    const updatedSchedule = [...schedule, ...entries];
-    setSchedule(updatedSchedule);
-    await DataService.saveEntries(updatedSchedule);
-    setIsSyncing(false);
+    await withSync(async () => {
+      const updatedSchedule = [...schedule, ...entries];
+      setSchedule(updatedSchedule);
+      await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+    });
   };
 
   const handleDeleteSession = async (id: string) => {
-    setIsSyncing(true);
-    const updatedSchedule = schedule.filter(s => s.id !== id);
-    setSchedule(updatedSchedule);
-    await DataService.saveEntries(updatedSchedule);
-    setIsSyncing(false);
+    await withSync(async () => {
+      const updatedSchedule = schedule.filter(s => s.id !== id);
+      setSchedule(updatedSchedule);
+      await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+    });
   };
 
   const handleUpdateSession = async (updatedEntry: ScheduleEntry) => {
-    setIsSyncing(true);
-    const updatedSchedule = schedule.map(s => s.id === updatedEntry.id ? updatedEntry : s);
-    setSchedule(updatedSchedule);
-    await DataService.saveEntries(updatedSchedule);
-    setIsSyncing(false);
+    await withSync(async () => {
+      const updatedSchedule = schedule.map(s => s.id === updatedEntry.id ? updatedEntry : s);
+      setSchedule(updatedSchedule);
+      await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+    });
   };
 
   const handleMoveSession = async (entryId: string, newDay: any, newStartTime: string) => {
-    setIsSyncing(true);
-    const entry = schedule.find(s => s.id === entryId);
-    if (entry) {
-      const [sh, sm] = entry.startTime.split(':').map(Number);
-      const [eh, em] = entry.endTime.split(':').map(Number);
-      const durationMinutes = (eh * 60 + em) - (sh * 60 + sm);
-      
-      const [nsh, nsm] = newStartTime.split(':').map(Number);
-      const totalNewEndMinutes = (nsh * 60 + nsm) + durationMinutes;
-      const neh = Math.floor(totalNewEndMinutes / 60);
-      const nem = totalNewEndMinutes % 60;
-      const newEndTime = `${String(neh).padStart(2, '0')}:${String(nem).padStart(2, '0')}`;
+    await withSync(async () => {
+      const entry = schedule.find(s => s.id === entryId);
+      if (entry) {
+        const [sh, sm] = entry.startTime.split(':').map(Number);
+        const [eh, em] = entry.endTime.split(':').map(Number);
+        const durationMinutes = (eh * 60 + em) - (sh * 60 + sm);
 
-      const updatedEntry = { ...entry, day: newDay, startTime: newStartTime, endTime: newEndTime };
-      const updatedSchedule = schedule.map(s => s.id === entryId ? updatedEntry : s);
-      setSchedule(updatedSchedule);
-      await DataService.saveEntries(updatedSchedule);
-    }
-    setIsSyncing(false);
+        const [nsh, nsm] = newStartTime.split(':').map(Number);
+        const totalNewEndMinutes = (nsh * 60 + nsm) + durationMinutes;
+        const neh = Math.floor(totalNewEndMinutes / 60);
+        const nem = totalNewEndMinutes % 60;
+        const newEndTime = `${String(neh).padStart(2, '0')}:${String(nem).padStart(2, '0')}`;
+
+        const updatedEntry = { ...entry, day: newDay, startTime: newStartTime, endTime: newEndTime };
+        const updatedSchedule = schedule.map(s => s.id === entryId ? updatedEntry : s);
+        setSchedule(updatedSchedule);
+        await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+      }
+    });
   };
 
   const handleDuplicateSession = async (entry: ScheduleEntry) => {
-    setIsSyncing(true);
-    const duplicatedEntry: ScheduleEntry = {
-      ...entry,
-      id: `s-${Date.now()}-dup`,
-    };
-    const updatedSchedule = [...schedule, duplicatedEntry];
-    setSchedule(updatedSchedule);
-    await DataService.saveEntries(updatedSchedule);
-    setIsSyncing(false);
+    await withSync(async () => {
+      const duplicatedEntry: ScheduleEntry = { ...entry, id: `s-${Date.now()}-dup` };
+      const updatedSchedule = [...schedule, duplicatedEntry];
+      setSchedule(updatedSchedule);
+      await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+    });
   };
 
   const handleUpdateUsers = async (updatedUsers: UserAccount[]) => {
-    setIsSyncing(true);
-    setUsers(updatedUsers);
-    await DataService.saveEntity('users', 'unitime_users', updatedUsers);
-    setIsSyncing(false);
+    await withSync(async () => {
+      setUsers(updatedUsers);
+      await DataService.saveEntity('users', 'unitime_users', updatedUsers);
+    });
   };
 
   const handleUpdateTerms = async (updatedTerms: Term[]) => {
-    setIsSyncing(true);
-    setTerms(updatedTerms);
-    await DataService.saveEntity('terms', 'unitime_terms', updatedTerms);
-    setIsSyncing(false);
+    await withSync(async () => {
+      setTerms(updatedTerms);
+      await DataService.saveEntity('terms', 'unitime_terms', updatedTerms);
+    });
   };
 
   const handleUpdateCourses = async (updatedCourses: Course[]) => {
-    setIsSyncing(true);
-    setCourses(updatedCourses);
-    await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id);
-    setIsSyncing(false);
+    await withSync(async () => {
+      setCourses(updatedCourses);
+      await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id);
+    });
   };
 
   const handleUpdateFaculties = async (updatedFaculties: Faculty[]) => {
-    setIsSyncing(true);
-    setFaculties(updatedFaculties);
-    await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id);
-    setIsSyncing(false);
+    await withSync(async () => {
+      setFaculties(updatedFaculties);
+      await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id);
+    });
   };
 
   const handleUpdateRooms = async (updatedRooms: Room[]) => {
-    setIsSyncing(true);
-    setRooms(updatedRooms);
-    await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id);
-    setIsSyncing(false);
+    await withSync(async () => {
+      setRooms(updatedRooms);
+      await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id);
+    });
   };
 
   const handleUpdateGroups = async (updatedGroups: StudentGroup[]) => {
-    setIsSyncing(true);
-    setGroups(updatedGroups);
-    await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id);
-    setIsSyncing(false);
+    await withSync(async () => {
+      setGroups(updatedGroups);
+      await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id);
+    });
   };
 
   const handleWipeAllData = async () => {
     if (!confirm('CRITICAL ACTION: This will delete ALL courses, faculty, rooms, cohorts and scheduled sessions from BOTH local storage and Supabase. Only user accounts and terms will be preserved. Proceed?')) {
       return;
     }
-    
+
+    isSyncingRef.current = true;
     setIsSyncing(true);
     try {
       if (supabase) {
@@ -349,9 +360,11 @@ const App: React.FC = () => {
       alert('Reset Failed: ' + (err.message || 'Unknown error.'));
     }
     setIsSyncing(false);
+    setTimeout(() => { isSyncingRef.current = false; }, 3000);
   };
 
   const handleFullSync = async () => {
+    isSyncingRef.current = true;
     setIsSyncing(true);
     try {
       // Sync in order to satisfy foreign keys
@@ -367,6 +380,7 @@ const App: React.FC = () => {
       alert('Full Sync Failed: ' + (err.message || 'Unknown error during sequential migration.'));
     }
     setIsSyncing(false);
+    setTimeout(() => { isSyncingRef.current = false; }, 3000);
   };
 
   const handleExportPDF = async () => {

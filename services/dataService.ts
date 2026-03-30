@@ -183,6 +183,25 @@ export class DataService {
           } else {
             console.log(`${tableName} synced (without facultyId).`);
           }
+        } else if (tableName === 'users' && upsertError.message.includes('users_username_key')) {
+          // Username unique constraint violated — a user with the same username but different id
+          // already exists in Supabase (e.g. a previously migrated superadmin).
+          // Retry one-by-one: skip rows that still conflict, save the rest (new users).
+          console.warn('Username conflict detected — upserting users individually...');
+          let savedCount = 0;
+          for (const item of sanitized) {
+            const { error: rowErr } = await supabase.from(tableName).upsert([item], { onConflict: 'id' });
+            if (rowErr) {
+              if (rowErr.message.includes('users_username_key')) {
+                console.warn(`Skipped user "${item.username}" — username already exists in Supabase with a different id.`);
+              } else {
+                console.error(`Failed to upsert user "${item.username}":`, rowErr);
+              }
+            } else {
+              savedCount++;
+            }
+          }
+          console.log(`Users synced individually: ${savedCount}/${sanitized.length} saved.`);
         } else {
           console.error(`Upsert failed for ${tableName}:`, upsertError);
           alert(`Supabase Sync Error (${tableName}): ${upsertError.message}`);

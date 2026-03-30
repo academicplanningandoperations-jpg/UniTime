@@ -35,8 +35,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUs
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
-  const [apiEndpoint, setApiEndpoint] = useState(localStorage.getItem('VITE_SUPABASE_URL') || '');
-  const [apiKey, setApiKey] = useState(localStorage.getItem('VITE_SUPABASE_ANON_KEY') || '');
+  // Read credentials from localStorage first, then fall back to build-time env vars.
+  // Env vars are baked into the Vercel bundle and work for all users automatically.
+  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+  const usingEnvVars = !!(envUrl && !envUrl.includes('xyz.supabase.co'));
+
+  const [apiEndpoint, setApiEndpoint] = useState(localStorage.getItem('VITE_SUPABASE_URL') || envUrl);
+  const [apiKey, setApiKey] = useState(localStorage.getItem('VITE_SUPABASE_ANON_KEY') || envKey);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'saved'>('idle');
 
   const initialUserState: Partial<UserAccount> = {
@@ -77,6 +83,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUs
       setSyncStatus('saved');
       setTimeout(() => window.location.reload(), 1500);
     } else {
+      // Guard: don't silently wipe credentials — ask for confirmation first.
+      const hasExisting = localStorage.getItem('VITE_SUPABASE_URL') || usingEnvVars;
+      if (hasExisting) {
+        if (!confirm('Both fields are empty. This will REMOVE the saved Supabase connection. Are you sure?')) return;
+      }
       localStorage.removeItem('VITE_SUPABASE_URL');
       localStorage.removeItem('VITE_SUPABASE_ANON_KEY');
       setSyncStatus('saved');
@@ -364,10 +375,16 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
              <div className="p-4 space-y-4 bg-white">
                 <div className="flex items-center justify-between border-b border-[#eee] pb-2">
                   <span className="text-[10px] font-bold text-[#333] uppercase tracking-widest">Active State</span>
-                  <span className={`text-[9px] font-bold uppercase px-2 shadow-[2px_2px_0_#ccc] border ${localStorage.getItem('VITE_SUPABASE_URL') ? 'bg-green-100 text-green-700 border-green-500' : 'bg-[#f0f0f0] text-[#666] border-[#999]'}`}>
-                    {localStorage.getItem('VITE_SUPABASE_URL') ? 'LIVE LINK' : 'SANDBOX / LOCAL'}
+                  <span className={`text-[9px] font-bold uppercase px-2 shadow-[2px_2px_0_#ccc] border ${(localStorage.getItem('VITE_SUPABASE_URL') || usingEnvVars) ? 'bg-green-100 text-green-700 border-green-500' : 'bg-[#f0f0f0] text-[#666] border-[#999]'}`}>
+                    {usingEnvVars && !localStorage.getItem('VITE_SUPABASE_URL') ? 'LIVE (ENV VARS)' : localStorage.getItem('VITE_SUPABASE_URL') ? 'LIVE LINK' : 'SANDBOX / LOCAL'}
                   </span>
                 </div>
+
+                {usingEnvVars && !localStorage.getItem('VITE_SUPABASE_URL') && (
+                  <div className="bg-blue-50 border border-blue-200 px-2 py-1.5 text-[9px] font-bold text-blue-700 uppercase tracking-wide">
+                    Connection configured via Vercel environment variables — all team members connect automatically. No manual entry needed.
+                  </div>
+                )}
 
                 <div className="space-y-1">
                    <label className="text-[10px] font-bold text-[#666] uppercase tracking-wide">Project URL</label>

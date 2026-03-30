@@ -62,7 +62,18 @@ const App: React.FC = () => {
 
   const [viewingTermId, setViewingTermId] = useState<string | null>(null);
 
-  const [users, setUsers] = useState<UserAccount[]>(MOCK_USERS);
+  // Initialise users from localStorage so we don't fall back to MOCK_USERS
+  // when Supabase is temporarily unavailable — avoids username constraint conflicts.
+  const [users, setUsers] = useState<UserAccount[]>(() => {
+    try {
+      const saved = localStorage.getItem('unitime_users');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return MOCK_USERS;
+  });
   // Initialise terms from localStorage so effectiveActiveTerm is the REAL term at mount,
   // not the mock one — prevents loading term-scoped data with the wrong termId.
   const [terms, setTerms] = useState<Term[]>(() => {

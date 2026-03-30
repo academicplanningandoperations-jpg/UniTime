@@ -39,12 +39,32 @@ export class DataService {
   // =========================================================
   // SCHEDULE
   // =========================================================
+  // Fetch all rows from a Supabase table, paginating past the default 1000-row limit.
+  private static async fetchAllPages<T>(
+    buildQuery: (from: number, to: number) => any
+  ): Promise<{ data: T[] | null; error: any }> {
+    const PAGE = 1000;
+    const all: T[] = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await buildQuery(from, from + PAGE - 1);
+      if (error) return { data: null, error };
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    return { data: all, error: null };
+  }
+
   static async loadAllEntries(termId?: string): Promise<ScheduleEntry[]> {
     try {
       if (supabase) {
-        let query = supabase.from('schedule').select('*');
-        if (termId) query = query.eq('termId', termId);
-        const { data, error } = await query;
+        const { data, error } = await this.fetchAllPages<ScheduleEntry>((from, to) => {
+          let q = supabase!.from('schedule').select('*').range(from, to);
+          if (termId) q = q.eq('termId', termId);
+          return q;
+        });
         if (!error && data) return data;
         if (error) console.warn('Supabase loadAllEntries error:', error);
       }
@@ -96,17 +116,21 @@ export class DataService {
   static async loadEntity<T>(tableName: string, storageKey: string, defaultValue: T[], termId?: string): Promise<T[]> {
     try {
       if (supabase) {
-        let query = supabase.from(tableName).select('*');
-        if (termId && tableName !== 'users' && tableName !== 'terms') {
-          query = query.eq('termId', termId);
-        }
-        const { data, error } = await query;
+        const { data, error } = await this.fetchAllPages<T>((from, to) => {
+          let q = supabase!.from(tableName).select('*').range(from, to);
+          if (termId && tableName !== 'users' && tableName !== 'terms') {
+            q = q.eq('termId', termId);
+          }
+          return q;
+        });
         if (!error && data) return data as T[];
 
         // If termId column missing, retry without filter
         if (error && (error.message.includes('termId') || error.code === '42703')) {
           console.warn(`termId column missing for ${tableName}, retrying without filter...`);
-          const { data: fallback, error: fallbackErr } = await supabase.from(tableName).select('*');
+          const { data: fallback, error: fallbackErr } = await this.fetchAllPages<T>((from, to) =>
+            supabase!.from(tableName).select('*').range(from, to)
+          );
           if (!fallbackErr && fallback) return fallback as T[];
         }
         if (error) console.warn(`Supabase loadEntity(${tableName}) error:`, error);
@@ -176,24 +200,33 @@ export class DataService {
         }
 
         if (sanitized.length > 0) {
-          let { error: upsertError } = await supabase
-            .from(tableName)
-            .upsert(sanitized, { onConflict: 'id' });
+          const BATCH = 500;
+          let batchError: any = null;
+          for (let i = 0; i < sanitized.length; i += BATCH) {
+            const chunk = sanitized.slice(i, i + BATCH);
+            const { error: chunkErr } = await supabase.from(tableName).upsert(chunk, { onConflict: 'id' });
+            if (chunkErr) { batchError = chunkErr; break; }
+          }
 
-          if (upsertError) {
-            if (upsertError.message.includes('facultyId') && tableName === 'faculties') {
+          if (batchError) {
+            if (batchError.message.includes('facultyId') && tableName === 'faculties') {
               console.warn('facultyId column missing, retrying without it...');
+              let retryError: any = null;
               const fallback = sanitized.map(({ facultyId, ...rest }: any) => rest);
-              const { error: retryErr } = await supabase.from(tableName).upsert(fallback, { onConflict: 'id' });
-              if (retryErr) {
-                console.error(`Retry upsert failed for ${tableName}:`, retryErr);
-                alert(`Supabase Sync Error (${tableName}): ${retryErr.message}`);
+              for (let i = 0; i < fallback.length; i += BATCH) {
+                const chunk = fallback.slice(i, i + BATCH);
+                const { error: retryErr } = await supabase.from(tableName).upsert(chunk, { onConflict: 'id' });
+                if (retryErr) { retryError = retryErr; break; }
+              }
+              if (retryError) {
+                console.error(`Retry upsert failed for ${tableName}:`, retryError);
+                alert(`Supabase Sync Error (${tableName}): ${retryError.message}`);
               } else {
-                console.log(`${tableName} synced (without facultyId).`);
+                console.log(`${tableName} synced (without facultyId, ${sanitized.length} rows).`);
               }
             } else {
-              console.error(`Upsert failed for ${tableName}:`, upsertError);
-              alert(`Supabase Sync Error (${tableName}): ${upsertError.message}`);
+              console.error(`Upsert failed for ${tableName}:`, batchError);
+              alert(`Supabase Sync Error (${tableName}): ${batchError.message}`);
             }
           } else {
             console.log(`${tableName} synced to Supabase (${sanitized.length} rows).`);

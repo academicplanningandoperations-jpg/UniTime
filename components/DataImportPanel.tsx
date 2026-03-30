@@ -67,7 +67,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       // ✅ FIX: IDs prefixed with termId so "1","2","3" from CSV never
       //         collides across terms in Supabase (e.g. "t1__K1007")
       const makeId = (prefix: string, raw: string | undefined, idx: number) => {
-        const base = raw || `${prefix}-${Date.now()}-${idx}`;
+        const base = raw || `${prefix}-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 9)}`;
         return `${activeTermId || 'local'}__${base}`;
       };
 

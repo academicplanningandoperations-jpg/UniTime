@@ -16,16 +16,19 @@ export class DataService {
   };
 
   // ✅ FIX: Sanitize item to only allowed keys, with termId injected
-  private static sanitizeItem(tableName: string, item: any, termId?: string): any {
+  private static sanitizeItem(tableName: string, item: any, termId?: string | null): any {
     const schema = this.SCHEMA_WHITELIST[tableName] || [];
     const newItem: any = {};
     schema.forEach(key => {
       if (item[key] !== undefined) newItem[key] = item[key];
     });
-    // Stamp termId for non-global tables
+
+    // ✅ FIX: Ensure termId is ALWAYS stamped if provided, even for items that don't have it.
+    // This prevents data from "vanishing" into a global scope where it becomes invisible to the current term filter.
     if (termId && tableName !== 'users' && tableName !== 'terms') {
       newItem.termId = termId;
     }
+    
     // Fix bad lastLogin values
     if (tableName === 'users' && newItem.lastLogin) {
       if (!newItem.lastLogin || newItem.lastLogin.length < 5) newItem.lastLogin = null;
@@ -152,12 +155,15 @@ export class DataService {
     if (!supabase) return;
 
     try {
-      // Only sync items belonging to this term
-      const itemsToSync = termId && tableName !== 'users' && tableName !== 'terms'
-        ? data.filter((item: any) => item.termId === termId || !item.termId)
-        : data;
+      // Only sync items belonging to this term (if termId provided)
+      let itemsToSync = data;
+      if (termId && tableName !== 'users' && tableName !== 'terms') {
+        itemsToSync = data.filter((item: any) => item.termId === termId || !item.termId);
+      }
 
-      if (itemsToSync.length === 0) return;
+      if (itemsToSync.length === 0 && data.length > 0 && termId) {
+        console.warn(`No items matched termId ${termId} for ${tableName}, but data was provided. This might be a tagging issue.`);
+      }
 
       const sanitized = itemsToSync.map(item => this.sanitizeItem(tableName, item, termId));
 

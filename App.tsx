@@ -115,47 +115,61 @@ const App: React.FC = () => {
     };
     loadData();
 
-    // Real-time Multi-user Synchronization
-    // ✅ FIX: Use a ref to track syncing state inside the realtime callback
-    // so we never overwrite state while a save is in progress.
-    // Also removed MOCK_* fallbacks — realtime should never inject demo data.
+    // Real-time Multi-user Synchronization — Debounced to avoid "vanishing" data race conditions.
     if (supabase) {
       const termId = effectiveActiveTerm?.id;
+      
+      // ✅ FIX: Simple debounce to avoid re-fetching while we are in the middle of a bulk upload event storm.
+      let debounceTimer: any = null;
+      const debouncedRefresh = (refreshFn: () => Promise<void>) => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          if (!isSyncingRef.current) await refreshFn();
+        }, 1000);
+      };
+
       const channel = supabase.channel('realtime_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
-          if (isSyncingRef.current) return; // ✅ ignore while we are saving
-          const s = await DataService.loadAllEntries(termId);
-          setSchedule(s);
+          debouncedRefresh(async () => {
+            const s = await DataService.loadAllEntries(termId);
+            setSchedule(s);
+          });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async () => {
-          if (isSyncingRef.current) return;
-          const u = await DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS);
-          setUsers(u);
+          debouncedRefresh(async () => {
+            const u = await DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS);
+            setUsers(u);
+          });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'terms' }, async () => {
-          if (isSyncingRef.current) return;
-          const t = await DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS);
-          setTerms(t);
+          debouncedRefresh(async () => {
+            const t = await DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS);
+            setTerms(t);
+          });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
-          if (isSyncingRef.current) return; // ✅ ignore — upload just fired this
-          const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId);
-          if (c.length > 0) setCourses(c); // ✅ never overwrite with empty
+          debouncedRefresh(async () => {
+            const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId);
+            if (c.length > 0) setCourses(c);
+          });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
-          if (isSyncingRef.current) return;
-          const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId);
-          if (f.length > 0) setFaculties(f);
+          debouncedRefresh(async () => {
+            const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId);
+            if (f.length > 0) setFaculties(f);
+          });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
-          if (isSyncingRef.current) return;
-          const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId);
-          if (r.length > 0) setRooms(r);
+          debouncedRefresh(async () => {
+            const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId);
+            if (r.length > 0) setRooms(r);
+          });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
-          if (isSyncingRef.current) return;
-          const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId);
-          if (g.length > 0) setGroups(g);
+          debouncedRefresh(async () => {
+            const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId);
+            if (g.length > 0) setGroups(g);
+          });
         })
         .subscribe();
 
@@ -277,28 +291,28 @@ const App: React.FC = () => {
   const handleUpdateCourses = async (updatedCourses: Course[]) => {
     setIsSyncing(true);
     setCourses(updatedCourses);
-    await DataService.saveEntity('courses', 'unitime_courses', updatedCourses);
+    await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id);
     setIsSyncing(false);
   };
 
   const handleUpdateFaculties = async (updatedFaculties: Faculty[]) => {
     setIsSyncing(true);
     setFaculties(updatedFaculties);
-    await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties);
+    await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id);
     setIsSyncing(false);
   };
 
   const handleUpdateRooms = async (updatedRooms: Room[]) => {
     setIsSyncing(true);
     setRooms(updatedRooms);
-    await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms);
+    await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id);
     setIsSyncing(false);
   };
 
   const handleUpdateGroups = async (updatedGroups: StudentGroup[]) => {
     setIsSyncing(true);
     setGroups(updatedGroups);
-    await DataService.saveEntity('groups', 'unitime_groups', updatedGroups);
+    await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id);
     setIsSyncing(false);
   };
 

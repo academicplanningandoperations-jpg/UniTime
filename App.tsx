@@ -176,16 +176,12 @@ const App: React.FC = () => {
       const debounceTimers: Record<string, any> = {};
       const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
         if (debounceTimers[tableName]) clearTimeout(debounceTimers[tableName]);
-        // ✅ FIX: 3s debounce — gives Supabase enough time to commit all 500-row batches
-        //         before the realtime listener re-fetches and sees the complete dataset.
+        // 2s debounce — gives Supabase time to finish batch commits before re-fetch.
+        // No isSyncingRef check here: confirm-after-save already handles write correctness,
+        // and the old blocking was causing missed refreshes when writes took > 2s.
         debounceTimers[tableName] = setTimeout(async () => {
-          if (!isSyncingRef.current) {
-            console.log(`Refreshing ${tableName} from Supabase...`);
-            await refreshFn();
-          } else {
-            console.log(`Skipping refresh for ${tableName} (write in progress)`);
-          }
-        }, 3000);
+          await refreshFn();
+        }, 2000);
       };
 
       // ── Realtime callbacks use Supabase-only reads (no localStorage fallback). ──
@@ -251,6 +247,40 @@ const App: React.FC = () => {
   useEffect(() => {
     activeTermIdRef.current = effectiveActiveTerm?.id;
   }, [effectiveActiveTerm?.id]);
+
+  // Safety-net: reload all data every 30 seconds and on window focus.
+  // This catches any missed realtime events (network blips, Supabase free-tier limits)
+  // so data that appears to "vanish" will be recovered within 30 seconds at most.
+  const refreshAllData = async () => {
+    if (!supabase) return;
+    const termId = activeTermIdRef.current;
+    const [t, u, c, f, r, g, s] = await Promise.all([
+      DataService.loadFromSupabaseOnly<Term>('terms'),
+      DataService.loadFromSupabaseOnly<UserAccount>('users'),
+      DataService.loadFromSupabaseOnly<Course>('courses', termId),
+      DataService.loadFromSupabaseOnly<Faculty>('faculties', termId),
+      DataService.loadFromSupabaseOnly<Room>('rooms', termId),
+      DataService.loadFromSupabaseOnly<StudentGroup>('groups', termId),
+      DataService.loadAllEntriesFromSupabase(termId),
+    ]);
+    if (t !== null && t.length > 0) setTerms(t);
+    if (u !== null && u.length > 0) setUsers(u);
+    if (c !== null) setCourses(c);
+    if (f !== null) setFaculties(f);
+    if (r !== null) setRooms(r);
+    if (g !== null) setGroups(g);
+    if (s !== null) setScheduleAndRef(s);
+  };
+
+  useEffect(() => {
+    if (!supabase) return;
+    const interval = setInterval(refreshAllData, 30000);
+    window.addEventListener('focus', refreshAllData);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', refreshAllData);
+    };
+  }, []);
 
   // Helper: wraps any write operation so isSyncingRef blocks realtime re-fetches
   // for the full debounce window (2s) + a safety buffer (1s extra = 3s total).

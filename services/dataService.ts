@@ -215,6 +215,29 @@ export class DataService {
     }
   }
 
+  // Wipe all rows for any term-scoped entity table (courses, faculties, rooms, groups).
+  // Unlike saveEntity, this ONLY deletes — no upsert, no confirm-after-save side-effects.
+  // Used by the admin "Wipe" button so a silent DELETE failure can't restore old data via re-read.
+  static async clearEntity(
+    tableName: string,
+    storageKey: string,
+    termId: string
+  ): Promise<void> {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const all = JSON.parse(saved);
+        const remaining = Array.isArray(all) ? all.filter((r: any) => r.termId !== termId) : [];
+        localStorage.setItem(storageKey, JSON.stringify(remaining));
+      }
+    } catch {}
+
+    if (!supabase) return;
+    const { error } = await supabase.from(tableName).delete().eq('termId', termId);
+    if (error) throw new Error(`Failed to wipe ${tableName}: ${error.message}`);
+    console.log(`${tableName} wiped for term ${termId}.`);
+  }
+
   // =========================================================
   // GENERIC ENTITY LOAD
   // =========================================================

@@ -477,6 +477,41 @@ const App: React.FC = () => {
     setTimeout(() => { isSyncingRef.current = false; }, 2000);
   };
 
+  // Admin: wipe a single entity table for the active term.
+  // Uses DataService.clearEntity (direct DELETE only, no saveEntity pipeline)
+  // so a silent Supabase failure can't restore old data via confirm-after-save.
+  const handleWipeEntity = async (
+    tab: 'Modules' | 'Faculties' | 'Rooms' | 'Groups'
+  ) => {
+    const termId = effectiveActiveTerm?.id;
+    const termName = effectiveActiveTerm?.name || termId || 'active term';
+    if (!termId) { alert('No active term selected.'); return; }
+    if (!confirm(`Delete ALL ${tab} for term "${termName}"? Other terms are not affected.`)) return;
+
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    try {
+      if (tab === 'Modules') {
+        await DataService.clearEntity('courses', 'unitime_courses', termId);
+        setCourses(prev => prev.filter((c: any) => c.termId !== termId));
+      } else if (tab === 'Faculties') {
+        await DataService.clearEntity('faculties', 'unitime_faculties', termId);
+        setFaculties(prev => prev.filter((f: any) => f.termId !== termId));
+      } else if (tab === 'Rooms') {
+        await DataService.clearEntity('rooms', 'unitime_rooms', termId);
+        setRooms(prev => prev.filter((r: any) => r.termId !== termId));
+      } else if (tab === 'Groups') {
+        await DataService.clearEntity('groups', 'unitime_groups', termId);
+        setGroups(prev => prev.filter((g: any) => g.termId !== termId));
+      }
+    } catch (err: any) {
+      alert(`Wipe failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => { isSyncingRef.current = false; }, 2000);
+    }
+  };
+
   // Admin: delete all schedule entries for the active term only.
   const handleClearSchedule = async () => {
     const termEntries = scheduleRef.current.filter((e: any) => e.termId === effectiveActiveTerm?.id);
@@ -807,7 +842,7 @@ const App: React.FC = () => {
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
-          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
           {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
         </div>
       </main>

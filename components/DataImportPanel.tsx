@@ -12,6 +12,7 @@ interface DataImportPanelProps {
   onUploadFaculties: (data: Faculty[]) => void;
   onUploadRooms: (data: Room[]) => void;
   onUploadGroups: (data: StudentGroup[]) => void;
+  onWipeData: (tab: 'Modules' | 'Faculties' | 'Rooms' | 'Groups') => Promise<void>;
   activeTermId?: string;
   activeTermName?: string;
 }
@@ -21,7 +22,7 @@ type ImportType = 'Modules' | 'Faculties' | 'Rooms' | 'Groups';
 const DataImportPanel: React.FC<DataImportPanelProps> = ({
   courses, faculties, rooms, groups,
   onUploadCourses, onUploadFaculties, onUploadRooms, onUploadGroups,
-  activeTermId, activeTermName
+  onWipeData, activeTermId, activeTermName
 }) => {
   const [activeTab, setActiveTab] = useState<ImportType>('Modules');
   const [lastUpload, setLastUpload] = useState<{ type: string; count: number } | null>(null);
@@ -152,14 +153,10 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
   };
 
   const clearAllData = () => {
-    if (!confirm(`Delete ALL ${activeTab} for term "${activeTermName || activeTermId}"? Other terms are not affected.`)) return;
-
-    // Clear from local state — saveEntity (called by the upload handlers) will
-    // delete-then-upsert in Supabase, so no direct Supabase call is needed here.
-    if (activeTab === 'Modules') onUploadCourses(courses.filter((c: any) => c.termId !== activeTermId));
-    if (activeTab === 'Faculties') onUploadFaculties(faculties.filter((f: any) => f.termId !== activeTermId));
-    if (activeTab === 'Rooms') onUploadRooms(rooms.filter((r: any) => r.termId !== activeTermId));
-    if (activeTab === 'Groups') onUploadGroups(groups.filter((g: any) => g.termId !== activeTermId));
+    // Delegate entirely to the dedicated wipe handler in App.tsx.
+    // It uses DataService.clearEntity (direct DELETE only) rather than going through
+    // saveEntity + confirm-after-save, which was causing deleted data to silently come back.
+    onWipeData(activeTab);
   };
 
   const addNewItem = () => {

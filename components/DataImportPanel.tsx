@@ -63,11 +63,18 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       // ✅ Every item gets stamped with activeTermId
       const termTag = { termId: activeTermId || '' };
 
+      // ✅ FIX: IDs prefixed with termId so "1","2","3" from CSV never
+      //         collides across terms in Supabase (e.g. "t1__K1007")
+      const makeId = (prefix: string, raw: string | undefined, idx: number) => {
+        const base = raw || `${prefix}-${Date.now()}-${idx}`;
+        return `${activeTermId || 'local'}__${base}`;
+      };
+
       const mappedData = parsedRows.map((item, i) => {
         if (activeImportType === 'Modules') {
           return {
             ...termTag,
-            id: item._module_id || `m-${Date.now()}-${i}`,
+            id: makeId('m', item._unique_name || item._module_id, i),
             code: item._unique_name || `M${i}`,
             name: item._name || 'Unknown Module',
             academicYear: item._academic_year || '2025',
@@ -80,7 +87,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         if (activeImportType === 'Faculties') {
           return {
             ...termTag,
-            id: item._staff_id || item._Faculty_ID || `f-${Date.now()}-${i}`,
+            id: makeId('f', item._Faculty_ID || item._staff_id, i),
             facultyId: item._Faculty_ID || item._staff_id,
             name: item._Faculty_name || 'Unknown Faculty',
             department: item._deptName || 'General',
@@ -93,7 +100,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         if (activeImportType === 'Rooms') {
           return {
             ...termTag,
-            id: item._room_id || item._unique_name || `r-${Date.now()}-${i}`,
+            id: makeId('r', item._unique_name || item._room_id, i),
             name: item._name || item._unique_name || 'Unknown Room',
             capacity: 60, type: 'Lecture',
             _room_id: item._room_id, _unique_name: item._unique_name,
@@ -103,7 +110,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         if (activeImportType === 'Groups') {
           return {
             ...termTag,
-            id: item._group_id || item._unique_name || `g-${Date.now()}-${i}`,
+            id: makeId('g', item._unique_name || item._group_id, i),
             name: item._name || item._unique_name || 'Unknown Group',
             program: 'General', semester: 1, studentCount: 30,
             _group_id: item._group_id, _unique_name: item._unique_name, _name: item._name

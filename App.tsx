@@ -63,11 +63,22 @@ const App: React.FC = () => {
   const [viewingTermId, setViewingTermId] = useState<string | null>(null);
 
   const [users, setUsers] = useState<UserAccount[]>(MOCK_USERS);
-  const [terms, setTerms] = useState<Term[]>(MOCK_TERMS);
-  const [courses, setCourses] = useState<Course[]>(MOCK_COURSES);
-  const [faculties, setFaculties] = useState<Faculty[]>(MOCK_FACULTY);
-  const [rooms, setRooms] = useState<Room[]>(MOCK_ROOMS);
-  const [groups, setGroups] = useState<StudentGroup[]>(MOCK_GROUPS);
+  // Initialise terms from localStorage so effectiveActiveTerm is the REAL term at mount,
+  // not the mock one — prevents loading term-scoped data with the wrong termId.
+  const [terms, setTerms] = useState<Term[]>(() => {
+    try {
+      const saved = localStorage.getItem('unitime_terms');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return MOCK_TERMS;
+  });
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [faculties, setFaculties] = useState<Faculty[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [groups, setGroups] = useState<StudentGroup[]>([]);
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
   const [clashes, setClashes] = useState<Clash[]>([]);
   const [maximizedPanelId, setMaximizedPanelId] = useState<string | null>(null);
@@ -79,6 +90,10 @@ const App: React.FC = () => {
   // Regular state can't be read inside closures reliably; refs can.
   const isSyncingRef = useRef(false);
 
+  // Tracks the current active termId — always up-to-date even inside stale closures
+  // (realtime callbacks are set up once and would otherwise close over the mount-time value).
+  const activeTermIdRef = useRef<string | undefined>(undefined);
+
   // ✅ FIX: effectiveActiveTerm moved here, BEFORE the useEffect that references it.
   // Previously it was declared after the hooks (line 543), causing a
   // "Cannot access before initialization" crash in the bundled output.
@@ -89,19 +104,34 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       setIsSyncing(true);
-      const termId = effectiveActiveTerm?.id;
       try {
-        const [u, t, c, f, r, g, s] = await Promise.all([
+        // Step 1: Load terms first so we know the REAL active termId.
+        // Loading everything in parallel with the mock termId (from initial state) was
+        // causing all term-scoped data to load empty because the mock term id ('t1')
+        // never matched the real data stored in Supabase / localStorage.
+        const [u, t] = await Promise.all([
           DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
           DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS),
-          DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId),
-          DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId),
-          DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId),
-          DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId),
-          DataService.loadAllEntries(termId)
         ]);
         setUsers(u);
         setTerms(t);
+
+        // Step 2: Derive the real active termId from the freshly loaded terms.
+        const realActiveTermId = viewingTermId
+          ? t.find(term => term.id === viewingTermId)?.id
+          : t.find(term => term.isActive)?.id;
+
+        // Keep the ref current so realtime callbacks always use the correct id.
+        activeTermIdRef.current = realActiveTermId;
+
+        // Step 3: Load all term-scoped entities with the correct termId.
+        const [c, f, r, g, s] = await Promise.all([
+          DataService.loadEntity<Course>('courses', 'unitime_courses', [], realActiveTermId),
+          DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], realActiveTermId),
+          DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], realActiveTermId),
+          DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], realActiveTermId),
+          DataService.loadAllEntries(realActiveTermId),
+        ]);
         setCourses(c);
         setFaculties(f);
         setRooms(r);
@@ -117,10 +147,8 @@ const App: React.FC = () => {
 
     // Real-time Multi-user Synchronization — Debounced to avoid "vanishing" data race conditions.
     if (supabase) {
-      const termId = effectiveActiveTerm?.id;
-      
-      // ✅ FIX: Debounce ensures we don't spam the server with re-fetches during bulk operations.
-      // 2000ms delay provides a safer window for the database to achieve read-visibility.
+      // ✅ FIX: All callbacks read activeTermIdRef.current at the time they fire,
+      // NOT the stale value captured when the effect first ran (which was the mock termId).
       let debounceTimer: any = null;
       const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
         if (debounceTimer) clearTimeout(debounceTimer);
@@ -137,7 +165,7 @@ const App: React.FC = () => {
       const channel = supabase.channel('realtime_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
           debouncedRefresh('schedule', async () => {
-            const s = await DataService.loadAllEntries(termId);
+            const s = await DataService.loadAllEntries(activeTermIdRef.current);
             setSchedule(s);
           });
         })
@@ -150,30 +178,30 @@ const App: React.FC = () => {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'terms' }, async () => {
           debouncedRefresh('terms', async () => {
             const t = await DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS);
-            setTerms(t);
+            if (t.length > 0) setTerms(t);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
           debouncedRefresh('courses', async () => {
-            const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId);
+            const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', [], activeTermIdRef.current);
             if (c.length > 0) setCourses(c);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
           debouncedRefresh('faculties', async () => {
-            const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId);
+            const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], activeTermIdRef.current);
             if (f.length > 0) setFaculties(f);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
           debouncedRefresh('rooms', async () => {
-            const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId);
+            const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], activeTermIdRef.current);
             if (r.length > 0) setRooms(r);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
           debouncedRefresh('groups', async () => {
-            const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId);
+            const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], activeTermIdRef.current);
             if (g.length > 0) setGroups(g);
           });
         })
@@ -184,6 +212,11 @@ const App: React.FC = () => {
       };
     }
   }, []);
+
+  // Keep activeTermIdRef current whenever the viewed/active term changes.
+  useEffect(() => {
+    activeTermIdRef.current = effectiveActiveTerm?.id;
+  }, [effectiveActiveTerm?.id]);
 
   // Helper: wraps any write operation so isSyncingRef blocks realtime re-fetches
   // for the full debounce window (2s) + a safety buffer (1s extra = 3s total).

@@ -90,10 +90,10 @@ const App: React.FC = () => {
         const [u, t, c, f, r, g, s] = await Promise.all([
           DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
           DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS),
-          DataService.loadEntity<Course>('courses', 'unitime_courses', MOCK_COURSES, termId),
-          DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', MOCK_FACULTY, termId),
-          DataService.loadEntity<Room>('rooms', 'unitime_rooms', MOCK_ROOMS, termId),
-          DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', MOCK_GROUPS, termId),
+          DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId),
+          DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId),
+          DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId),
+          DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId),
           DataService.loadAllEntries(termId)
         ]);
         setUsers(u);
@@ -626,7 +626,7 @@ const App: React.FC = () => {
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
-          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} activeTermId={effectiveActiveTerm?.id} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
           {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} />}
         </div>
       </main>

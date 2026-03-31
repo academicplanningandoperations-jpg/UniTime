@@ -170,6 +170,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         academicYear: newItem._academic_year || '2025',
         semester: Number(newItem.Semester?.replace('SEM-', '')) || 1,
         credits: 3, duration: 1, type: 'Theory',
+        department: newItem.department || 'General',
         _module_id: newItem._module_id, _unique_name: newItem._unique_name,
         _name: newItem._name, _academic_year: newItem._academic_year, Semester: newItem.Semester
       };
@@ -315,6 +316,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         <input type="text" value={newItem._name || ''} onChange={e => setNewItem({...newItem, _name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" />
         <label className="text-[11px] font-bold text-[#333] uppercase">_academic_year</label>
         <input type="text" value={newItem._academic_year || ''} onChange={e => setNewItem({...newItem, _academic_year: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. 2025" />
+        <label className="text-[11px] font-bold text-[#333] uppercase">Department</label>
+        <input type="text" value={newItem.department || ''} onChange={e => setNewItem({...newItem, department: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. Computer Science" />
         <label className="text-[11px] font-bold text-[#333] uppercase">Semester</label>
         <input type="text" value={newItem.Semester || ''} onChange={e => setNewItem({...newItem, Semester: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. SEM-1" />
       </div>

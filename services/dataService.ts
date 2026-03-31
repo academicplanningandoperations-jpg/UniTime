@@ -20,11 +20,13 @@ export class DataService {
     const schema = this.SCHEMA_WHITELIST[tableName] || [];
     const newItem: any = {};
     schema.forEach(key => {
+      // ✅ Allow both camelCase and database fields (like _module_id) temporarily
+      // but prioritize the schema whitelist for Supabase compatibility.
       if (item[key] !== undefined) newItem[key] = item[key];
     });
 
-    // ✅ FIX: Ensure termId is ALWAYS stamped if provided, even for items that don't have it.
-    // This prevents data from "vanishing" into a global scope where it becomes invisible to the current term filter.
+    // 🚀 STRENGTHEN RELATIONSHIPS: Ensure termId is ALWAYS stamped if provided.
+    // This is the primary key for all filtered queries and prevents data "vanishing".
     if (termId && tableName !== 'users' && tableName !== 'terms') {
       newItem.termId = termId;
     }
@@ -33,6 +35,12 @@ export class DataService {
     if (tableName === 'users' && newItem.lastLogin) {
       if (!newItem.lastLogin || newItem.lastLogin.length < 5) newItem.lastLogin = null;
     }
+
+    // ✅ DEBUG: Log potentially malformed items
+    if (!newItem.id && tableName !== 'users') {
+      console.warn(`[DataService] Item in ${tableName} is missing an ID!`, item);
+    }
+
     return newItem;
   }
 
@@ -263,7 +271,10 @@ export class DataService {
           }
           return q;
         });
-        if (!error && data) return data as T[];
+        if (!error && data) {
+          console.log(`[DataService] Loaded ${data.length} items for ${tableName} from Supabase.`);
+          return data as T[];
+        }
 
         // If termId column missing, retry without filter
         if (error && (error.message.includes('termId') || error.code === '42703')) {

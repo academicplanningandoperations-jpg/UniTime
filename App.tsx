@@ -481,6 +481,17 @@ const App: React.FC = () => {
       localStorage.removeItem('unitime_groups');
       
       alert('System successfully reset. All demo data has been purged.');
+      
+      // ✅ CRITICAL RECOVERY: After a full wipe, force browser to clear the SW and Cache
+      // to prevent deleted data from "reappearing" via old cached API responses.
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for(let r of regs) await r.unregister();
+      }
+      const keys = await caches.keys();
+      for(let k of keys) await caches.delete(k);
+      
+      window.location.replace(window.location.origin + '?wipe_complete=' + Date.now());
     } catch (err: any) {
       alert('Reset Failed: ' + (err.message || 'Unknown error.'));
     }

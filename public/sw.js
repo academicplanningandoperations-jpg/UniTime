@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unitime-v3'; // Incrementing to force update
+const CACHE_NAME = 'unitime-v4'; // Incrementing to force update
 const STATIC_ASSETS = [
   '/',
   '/pwa-icon.png',
@@ -42,6 +42,12 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
+
+  // ✅ CRITICAL FIX: DO NOT CACHE Supabase API calls or any other external API requests.
+  // This ensures the application always sees the latest data from the database.
+  if (url.hostname.includes('supabase.co') || url.hostname.includes('postgrest')) {
+    return; // Pass through to network, do not interfere
+  }
 
   // Network-First for Navigation (the main page)
   if (event.request.mode === 'navigate') {

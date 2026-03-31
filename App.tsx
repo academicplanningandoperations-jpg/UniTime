@@ -176,10 +176,18 @@ const App: React.FC = () => {
       const debounceTimers: Record<string, any> = {};
       const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
         if (debounceTimers[tableName]) clearTimeout(debounceTimers[tableName]);
+        
         // 2s debounce — gives Supabase time to finish batch commits before re-fetch.
-        // No isSyncingRef check here: confirm-after-save already handles write correctness,
-        // and the old blocking was causing missed refreshes when writes took > 2s.
         debounceTimers[tableName] = setTimeout(async () => {
+          // ✅ FIX: Explicitly ignore incoming Supabase changes if we are currently
+          // performing a local write (isSyncingRef.current === true). 
+          // This prevents the "vanishing data" race condition where a DELETE 
+          // event from our own wipe-then-upsert cycle overwrites our local state 
+          // before the UPSERT part has finished and been committed.
+          if (isSyncingRef.current) {
+            console.log(`Ignoring realtime ${tableName} refresh: local sync in progress.`);
+            return;
+          }
           await refreshFn();
         }, 2000);
       };
@@ -291,8 +299,11 @@ const App: React.FC = () => {
       await fn();
     } finally {
       setIsSyncing(false);
-      // 2s: expires BEFORE the 3s debounce fires, so own-write refresh always runs correctly
-      setTimeout(() => { isSyncingRef.current = false; }, 2000);
+      // ✅ FIX: Increased safety buffer to 4s (from 2s).
+      // This ensures that even for large bulk uploads, the "Ignore realtime" guard
+      // stays active long enough for Supabase to finish its internal indexing
+      // and for all own-triggered Postgres events to be processed.
+      setTimeout(() => { isSyncingRef.current = false; }, 4000);
     }
   };
 
@@ -474,7 +485,7 @@ const App: React.FC = () => {
       alert('Reset Failed: ' + (err.message || 'Unknown error.'));
     }
     setIsSyncing(false);
-    setTimeout(() => { isSyncingRef.current = false; }, 2000);
+    setTimeout(() => { isSyncingRef.current = false; }, 4000);
   };
 
   // Admin: wipe a single entity table for the active term.
@@ -549,7 +560,7 @@ const App: React.FC = () => {
       alert('Full Sync Failed: ' + (err.message || 'Unknown error during sequential migration.'));
     }
     setIsSyncing(false);
-    setTimeout(() => { isSyncingRef.current = false; }, 3000);
+    setTimeout(() => { isSyncingRef.current = false; }, 4000);
   };
 
   const handleExportPDF = async () => {

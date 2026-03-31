@@ -508,7 +508,7 @@ const App: React.FC = () => {
     const termId = effectiveActiveTerm?.id;
     const termName = effectiveActiveTerm?.name || termId || 'active term';
     if (!termId) { alert('No active term selected.'); return; }
-    if (!confirm(`Delete ALL ${tab} for term "${termName}"? Other terms are not affected.`)) return;
+    if (!confirm(`Delete ALL ${tab} for term "${termName}"? Other terms are not affected. \n\nNOTE: Scheduled sessions for this term will also be cleared to satisfy database requirements.`)) return;
 
     isSyncingRef.current = true;
     setIsSyncing(true);
@@ -526,6 +526,12 @@ const App: React.FC = () => {
         await DataService.clearEntity('groups', 'unitime_groups', termId);
         setGroups(prev => prev.filter((g: any) => g.termId !== termId));
       }
+      
+      // ✅ SYNC UI: Since DataService.clearEntity also wipes the schedule for this term
+      // to satisfy DB foreign keys, we MUST clear our local schedule state as well.
+      const remainingSchedule = scheduleRef.current.filter((s: any) => s.termId !== termId);
+      setScheduleAndRef(remainingSchedule);
+
     } catch (err: any) {
       alert(`Wipe failed: ${err.message || 'Unknown error'}`);
     } finally {

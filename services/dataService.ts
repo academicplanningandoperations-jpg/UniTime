@@ -253,6 +253,30 @@ export class DataService {
     } catch {}
 
     if (!supabase) return;
+
+    // ✅ FIX: Delete dependent schedule records first to satisfy DB foreign key constraints.
+    // Tables like courses, faculties, and rooms are referenced by the schedule table.
+    // If we don't clear the schedule for this term first, the DELETE on the registry will fail.
+    try {
+      if (['courses', 'faculties', 'rooms', 'groups'].includes(tableName)) {
+        const { error: scheduleError } = await supabase.from('schedule').delete().eq('termId', termId);
+        if (scheduleError) {
+          console.warn(`[DataService] Non-fatal: Pre-wipe schedule clear failed for ${tableName}:`, scheduleError);
+        } else {
+          console.log(`[DataService] Pre-emptively cleared schedule for term ${termId} to satisfy constraints.`);
+          // Update local schedule storage too
+          const savedSchedule = localStorage.getItem(this.STORAGE_KEY);
+          if (savedSchedule) {
+            const allSchedules = JSON.parse(savedSchedule);
+            const remainingSchedules = Array.isArray(allSchedules) ? allSchedules.filter((s: any) => s.termId !== termId) : [];
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(remainingSchedules));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[DataService] Pre-wipe schedule cleanup crash for ${tableName}:`, e);
+    }
+
     const { error } = await supabase.from(tableName).delete().eq('termId', termId);
     if (error) throw new Error(`Failed to wipe ${tableName}: ${error.message}`);
     console.log(`${tableName} wiped for term ${termId}.`);

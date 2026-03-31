@@ -282,6 +282,39 @@ export class DataService {
     console.log(`${tableName} wiped for term ${termId}.`);
   }
 
+  // Re-tag all existing entity data with a new termId.
+  // Use this when data was uploaded under a different term (e.g. mock term 't1')
+  // and needs to be linked to the real active term without re-uploading everything.
+  static async migrateDataToTerm(newTermId: string): Promise<{ [table: string]: number }> {
+    if (!supabase) throw new Error('Supabase not configured');
+    const tables = [
+      { name: 'courses',   storageKey: 'unitime_courses' },
+      { name: 'faculties', storageKey: 'unitime_faculties' },
+      { name: 'rooms',     storageKey: 'unitime_rooms' },
+      { name: 'groups',    storageKey: 'unitime_groups' },
+    ];
+    const counts: { [table: string]: number } = {};
+    for (const { name, storageKey } of tables) {
+      const { data, error } = await this.fetchAllPages<any>((from, to) =>
+        supabase!.from(name).select('*').range(from, to)
+      );
+      if (error || !data) { counts[name] = 0; continue; }
+      if (data.length === 0) { counts[name] = 0; continue; }
+      const updated = data.map((row: any) => ({ ...row, termId: newTermId }));
+      const BATCH = 500;
+      for (let i = 0; i < updated.length; i += BATCH) {
+        const { error: upsertErr } = await supabase.from(name).upsert(
+          updated.slice(i, i + BATCH).map((r: any) => this.sanitizeItem(name, r, newTermId)),
+          { onConflict: 'id' }
+        );
+        if (upsertErr) throw new Error(`Migration failed for ${name}: ${upsertErr.message}`);
+      }
+      try { localStorage.setItem(storageKey, JSON.stringify(updated)); } catch {}
+      counts[name] = data.length;
+    }
+    return counts;
+  }
+
   // =========================================================
   // GENERIC ENTITY LOAD
   // =========================================================

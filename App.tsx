@@ -54,6 +54,9 @@ const App: React.FC = () => {
   };
 
   const [isSyncing, setIsSyncing] = useState(false);
+  // True while loadData is running — Login shows a spinner so users don't
+  // attempt login before Supabase users are loaded (would fail with MOCK_USERS).
+  const [isInitializing, setIsInitializing] = useState(true);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
   const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(() => {
     const isSkipped = localStorage.getItem('unitime_skip_supabase') === 'true';
@@ -164,6 +167,7 @@ const App: React.FC = () => {
         console.error('Initial data loading failed:', err);
       } finally {
         setIsSyncing(false);
+        setIsInitializing(false);
       }
     };
     loadData();
@@ -559,6 +563,39 @@ const App: React.FC = () => {
     }
   };
 
+  // Re-tag all existing data with the active term's ID.
+  // Fixes the case where data was uploaded under the mock term (id='t1') but the
+  // real active term has a different ID — data exists in Supabase but nothing shows.
+  const handleMigrateData = async () => {
+    const termId = effectiveActiveTerm?.id;
+    const termName = effectiveActiveTerm?.name || termId || 'active term';
+    if (!termId) { alert('No active term selected.'); return; }
+    if (!confirm(`Re-link ALL existing data to term "${termName}"?\n\nThis fixes the "data exists in Supabase but nothing shows" problem. It does not delete or re-upload anything.`)) return;
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    try {
+      const counts = await DataService.migrateDataToTerm(termId);
+      const summary = Object.entries(counts).map(([t, n]) => `${t}: ${n} rows`).join(', ');
+      // Reload all data so UI reflects the migration immediately
+      const [c, f, r, g] = await Promise.all([
+        DataService.loadFromSupabaseOnly<Course>('courses', termId),
+        DataService.loadFromSupabaseOnly<Faculty>('faculties', termId),
+        DataService.loadFromSupabaseOnly<Room>('rooms', termId),
+        DataService.loadFromSupabaseOnly<StudentGroup>('groups', termId),
+      ]);
+      if (c !== null) setCourses(c);
+      if (f !== null) setFaculties(f);
+      if (r !== null) setRooms(r);
+      if (g !== null) setGroups(g);
+      alert(`Data re-linked successfully!\n${summary}`);
+    } catch (err: any) {
+      alert('Migration failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => { isSyncingRef.current = false; }, 2000);
+    }
+  };
+
   const handleFullSync = async () => {
     isSyncingRef.current = true;
     setIsSyncing(true);
@@ -780,7 +817,7 @@ const App: React.FC = () => {
     }
   }, [activeTab, currentUser]);
 
-  if (!currentUser) return <Login onLogin={(user) => { setCurrentUser(user); resetUIState(); }} users={users} />;
+  if (!currentUser) return <Login onLogin={(user) => { setCurrentUser(user); resetUIState(); }} users={users} isInitializing={isInitializing} />;
   
   if (!isSupabaseConfigured) {
     return <SupabaseSetup onConfigured={() => {
@@ -870,7 +907,7 @@ const App: React.FC = () => {
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
           {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
-          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
+          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} onMigrateData={handleMigrateData} />}
         </div>
       </main>
 

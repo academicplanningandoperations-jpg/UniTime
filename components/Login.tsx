@@ -6,9 +6,10 @@ import Logo from './Logo';
 interface LoginProps {
   onLogin: (user: UserAccount) => void;
   users: UserAccount[];
+  isInitializing?: boolean;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin, users }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -100,11 +101,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, users }) => {
             )}
 
             <div className="flex justify-end gap-2 pt-2">
-              <button 
-                type="submit" 
-                className="bg-[#185baf] text-white px-5 py-1.5 text-[11px] font-bold uppercase tracking-widest border border-[#0d3b76] hover:bg-[#124584] shadow-[2px_2px_0_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all min-w-[80px]"
+              <button
+                type="submit"
+                disabled={!!isInitializing}
+                className="bg-[#185baf] text-white px-5 py-1.5 text-[11px] font-bold uppercase tracking-widest border border-[#0d3b76] hover:bg-[#124584] shadow-[2px_2px_0_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all min-w-[80px] disabled:opacity-50 disabled:cursor-wait"
               >
-                OK
+                {isInitializing ? 'Loading...' : 'OK'}
               </button>
               <button 
                 type="button" 

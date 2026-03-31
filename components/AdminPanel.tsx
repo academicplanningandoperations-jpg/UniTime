@@ -14,7 +14,8 @@ import {
   Save,
   CloudLightning,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCcw
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -31,9 +32,10 @@ interface AdminPanelProps {
   activeTermId?: string;
   activeTermName?: string;
   onClearSchedule: () => Promise<void>;
+  onMigrateData: () => Promise<void>;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, onFullSync, onWipeAllData, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, onFullSync, onWipeAllData, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule, onMigrateData }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -492,11 +494,19 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
                      {syncStatus === 'saved' ? 'CREDENTIALS APPLIED' : 'BIND CONNECTION'}
                   </button>
 
-                  <button 
+                  <button
                     onClick={onFullSync}
                     className="w-full py-2 bg-[#f0f0f0] border-2 border-[#185baf] text-[#185baf] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white transition-colors"
                   >
                      <CloudLightning className="w-4 h-4" /> REPAIR DATABASE CONNECTIONS
+                  </button>
+
+                  <button
+                    onClick={onMigrateData}
+                    className="w-full py-2 bg-[#fff8e1] border-2 border-[#f59e0b] text-[#b45309] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-[#f59e0b] hover:text-white transition-all"
+                    title="Use this if data exists in Supabase but nothing shows in the app"
+                  >
+                     <RefreshCcw className="w-4 h-4" /> FIX DATA LINKAGE (DATA NOT SHOWING)
                   </button>
 
                   <button 

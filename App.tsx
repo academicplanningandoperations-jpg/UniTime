@@ -540,18 +540,17 @@ const App: React.FC = () => {
     }
   };
 
-  // Admin: delete all schedule entries for the active term only.
+  // Admin: delete ALL schedule entries across all terms.
+  // No termId filter — catches old/orphaned entries (e.g. termId='t1' from mock data)
+  // that would be missed if we only filtered by effectiveActiveTerm?.id.
   const handleClearSchedule = async () => {
-    const termEntries = scheduleRef.current.filter((e: any) => e.termId === effectiveActiveTerm?.id);
-    const termName = effectiveActiveTerm?.name || effectiveActiveTerm?.id || 'active term';
-    if (!confirm(`Delete ALL ${termEntries.length} timetable entries for "${termName}"? This cannot be undone.`)) return;
+    const totalEntries = scheduleRef.current.length;
+    if (!confirm(`Delete ALL ${totalEntries} timetable entries? This cannot be undone.`)) return;
     isSyncingRef.current = true;
     setIsSyncing(true);
     try {
-      await DataService.clearSchedule(effectiveActiveTerm?.id);
-      // Remove only this term's entries from local state, keep other terms intact
-      const remaining = scheduleRef.current.filter((e: any) => e.termId !== effectiveActiveTerm?.id);
-      setScheduleAndRef(remaining);
+      await DataService.clearSchedule(); // no termId = deletes every row in schedule table
+      setScheduleAndRef([]);
     } catch (err: any) {
       alert('Failed to clear schedule: ' + (err.message || 'Unknown error'));
     } finally {

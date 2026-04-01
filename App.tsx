@@ -172,62 +172,61 @@ const App: React.FC = () => {
       const debounceTimers: Record<string, any> = {};
       const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
         if (debounceTimers[tableName]) clearTimeout(debounceTimers[tableName]);
-        // 2s debounce — coalesces rapid events (e.g. 500-row bulk insert fires 500 events).
-        // No isSyncingRef block here: confirm-after-save handles write correctness,
-        // and blocking caused missed refreshes when writes took >2s.
+        // 5s debounce — gives bulk writes time to finish before re-reading.
+        // Also skips entirely if we're actively writing (isSyncingRef) or
+        // within the 10s post-write guard window.
         debounceTimers[tableName] = setTimeout(async () => {
+          if (isSyncingRef.current || DataService.isWithinWriteGuard()) {
+            console.log(`[RT] Skipping ${tableName} refresh — write guard active`);
+            return;
+          }
           await refreshFn();
-        }, 2000);
+        }, 5000);
       };
 
       // ── Realtime callbacks use Supabase-only reads (no localStorage fallback). ──
       // If Supabase is temporarily unavailable the method returns null and we skip
-      // the state update — current state stays intact rather than being overwritten
-      // with stale localStorage data or MOCK data (which would set activeTermIdRef
-      // to 't1' and cause every subsequent query to return empty results).
+      // the state update — current state stays intact.
       const channel = supabase.channel('realtime_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
           debouncedRefresh('schedule', async () => {
-            const s = await DataService.loadAllEntriesFromSupabase(activeTermIdRef.current);
+            const s = await DataService.fetchTable<ScheduleEntry>('schedule', activeTermIdRef.current);
             if (s !== null) setScheduleAndRef(s);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async () => {
           debouncedRefresh('users', async () => {
-            const u = await DataService.loadFromSupabaseOnly<UserAccount>('users');
+            const u = await DataService.fetchTable<UserAccount>('users');
             if (u !== null && u.length > 0) setUsers(u);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'terms' }, async () => {
           debouncedRefresh('terms', async () => {
-            const t = await DataService.loadFromSupabaseOnly<Term>('terms');
-            // Guard: only update if Supabase returned real terms — never let a
-            // Supabase failure revert terms to MOCK_TERMS (which would break
-            // activeTermIdRef and cause all data to appear empty).
+            const t = await DataService.fetchTable<Term>('terms');
             if (t !== null && t.length > 0) setTerms(t);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
           debouncedRefresh('courses', async () => {
-            const c = await DataService.loadFromSupabaseOnly<Course>('courses', activeTermIdRef.current);
+            const c = await DataService.fetchTable<Course>('courses', activeTermIdRef.current);
             if (c !== null) setCourses(c);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
           debouncedRefresh('faculties', async () => {
-            const f = await DataService.loadFromSupabaseOnly<Faculty>('faculties', activeTermIdRef.current);
+            const f = await DataService.fetchTable<Faculty>('faculties', activeTermIdRef.current);
             if (f !== null) setFaculties(f);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
           debouncedRefresh('rooms', async () => {
-            const r = await DataService.loadFromSupabaseOnly<Room>('rooms', activeTermIdRef.current);
+            const r = await DataService.fetchTable<Room>('rooms', activeTermIdRef.current);
             if (r !== null) setRooms(r);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
           debouncedRefresh('groups', async () => {
-            const g = await DataService.loadFromSupabaseOnly<StudentGroup>('groups', activeTermIdRef.current);
+            const g = await DataService.fetchTable<StudentGroup>('groups', activeTermIdRef.current);
             if (g !== null) setGroups(g);
           });
         })
@@ -245,30 +244,34 @@ const App: React.FC = () => {
   }, [effectiveActiveTerm?.id]);
 
   // Safety-net: reload all data every 30 seconds and on window focus.
-  // This catches any missed realtime events (network blips, Supabase free-tier limits)
-  // so data that appears to "vanish" will be recovered within 30 seconds at most.
-  // Full reload from Supabase — used by 30s polling and window focus.
-  // Uses loadEntity (not loadFromSupabaseOnly) so auto-migration runs if termId mismatches.
+  // CRITICAL: Skips refresh if a write just happened (write guard) to prevent
+  // a read-before-commit from wiping freshly uploaded data.
   const refreshAllData = async () => {
     if (!supabase) return;
+    if (isSyncingRef.current || DataService.isWithinWriteGuard()) {
+      console.log('[App] refreshAllData skipped — write guard active');
+      return;
+    }
     const termId = activeTermIdRef.current;
     try {
       const [t, u, c, f, r, g, s] = await Promise.all([
-        DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS),
-        DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
-        DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId),
-        DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId),
-        DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId),
-        DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId),
-        DataService.loadAllEntries(termId),
+        DataService.fetchTable<Term>('terms'),
+        DataService.fetchTable<UserAccount>('users'),
+        DataService.fetchTable<Course>('courses', termId),
+        DataService.fetchTable<Faculty>('faculties', termId),
+        DataService.fetchTable<Room>('rooms', termId),
+        DataService.fetchTable<StudentGroup>('groups', termId),
+        DataService.fetchTable<ScheduleEntry>('schedule', termId),
       ]);
-      if (t.length > 0) setTerms(t);
-      if (u.length > 0) setUsers(u);
-      setCourses(c);
-      setFaculties(f);
-      setRooms(r);
-      setGroups(g);
-      setScheduleAndRef(s);
+      // Only update state if fetch succeeded (non-null) and not empty
+      // (empty result during normal operation likely means stale read)
+      if (t !== null && t.length > 0) setTerms(t);
+      if (u !== null && u.length > 0) setUsers(u);
+      if (c !== null) setCourses(c);
+      if (f !== null) setFaculties(f);
+      if (r !== null) setRooms(r);
+      if (g !== null) setGroups(g);
+      if (s !== null) setScheduleAndRef(s);
     } catch (err) {
       console.error('[App] refreshAllData failed:', err);
     }
@@ -588,10 +591,10 @@ const App: React.FC = () => {
       const summary = Object.entries(counts).map(([t, n]) => `${t}: ${n} rows`).join(', ');
       // Reload all data so UI reflects the migration immediately
       const [c, f, r, g] = await Promise.all([
-        DataService.loadFromSupabaseOnly<Course>('courses', termId),
-        DataService.loadFromSupabaseOnly<Faculty>('faculties', termId),
-        DataService.loadFromSupabaseOnly<Room>('rooms', termId),
-        DataService.loadFromSupabaseOnly<StudentGroup>('groups', termId),
+        DataService.fetchTable<Course>('courses', termId),
+        DataService.fetchTable<Faculty>('faculties', termId),
+        DataService.fetchTable<Room>('rooms', termId),
+        DataService.fetchTable<StudentGroup>('groups', termId),
       ]);
       if (c !== null) setCourses(c);
       if (f !== null) setFaculties(f);

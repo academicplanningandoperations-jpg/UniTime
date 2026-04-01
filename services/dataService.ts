@@ -19,6 +19,17 @@ const TERM_SCOPED = new Set(['courses', 'faculties', 'rooms', 'groups', 'schedul
 export class DataService {
   private static SCHEDULE_KEY = 'unitime_full_dataset';
 
+  // Timestamp of the last successful write — background refreshes should
+  // skip overwriting state within WRITE_GUARD_MS of a write to avoid
+  // a read-before-commit race wiping freshly uploaded data.
+  static lastWriteTimestamp = 0;
+  private static WRITE_GUARD_MS = 10_000; // 10 seconds
+
+  /** Returns true if a write happened within the guard window */
+  static isWithinWriteGuard(): boolean {
+    return Date.now() - this.lastWriteTimestamp < this.WRITE_GUARD_MS;
+  }
+
   // ─── Private helpers ────────────────────────────────────────────────────────
 
   private static sanitize(tableName: string, item: any, termId?: string | null): any {
@@ -61,9 +72,7 @@ export class DataService {
   }
 
   // ─── Core fetch ────────────────────────────────────────────────────────────
-  // Supabase is the single source of truth.
-  // If 0 rows returned for the active term, checks if data exists under ANY termId
-  // and auto-migrates it — fixes the "data in Supabase but 0 in app" problem permanently.
+  // Supabase is the single source of truth.  Simple SELECT with optional termId filter.
 
   static async fetchTable<T>(tableName: string, termId?: string): Promise<T[] | null> {
     if (!supabase) return null;
@@ -77,23 +86,6 @@ export class DataService {
       if (error) {
         console.error(`[DB] fetch ${tableName} failed:`, error);
         return null;
-      }
-
-      // Auto-migrate: if 0 rows for this term but data exists elsewhere, re-tag it all
-      if (data.length === 0 && termId && TERM_SCOPED.has(tableName)) {
-        const { data: all, error: allErr } = await this.fetchAllPages<any>((from, to) =>
-          supabase!.from(tableName).select('*').range(from, to)
-        );
-        if (!allErr && all.length > 0) {
-          console.log(`[DB] Auto-migrating ${all.length} ${tableName} rows → termId ${termId}`);
-          const sanitized = all.map((r: any) => this.sanitize(tableName, r, termId));
-          const err = await this.upsertBatch(tableName, sanitized);
-          if (err) {
-            console.error(`[DB] Auto-migrate upsert failed for ${tableName}:`, err);
-            return all as T[]; // return original even if upsert failed
-          }
-          return all.map((r: any) => ({ ...r, termId })) as T[];
-        }
       }
 
       console.log(`[DB] ${tableName}: loaded ${data.length} rows${termId ? ` (term ${termId})` : ''}`);
@@ -181,33 +173,33 @@ export class DataService {
 
     if (!supabase) return;
 
-    try {
-      const isTermScoped = !!(termId && TERM_SCOPED.has(tableName));
-      let itemsToSync = isTermScoped
-        ? data.filter((item: any) => item.termId === termId || !item.termId)
-        : data;
+    // No outer try-catch: errors MUST propagate to the caller (withSync)
+    // so it can alert the user and trigger recovery.  The old code had a
+    // catch that silently swallowed upsert failures, making the app think
+    // the write succeeded when it hadn't.
+    const isTermScoped = !!(termId && TERM_SCOPED.has(tableName));
+    let itemsToSync = isTermScoped
+      ? data.filter((item: any) => item.termId === termId || !item.termId)
+      : data;
 
-      const sanitized = itemsToSync.map(item => this.sanitize(tableName, item, termId));
+    const sanitized = itemsToSync.map(item => this.sanitize(tableName, item, termId));
 
-      if (sanitized.length > 0) {
-        const upsertErr = await this.upsertBatch(tableName, sanitized);
-        if (upsertErr) {
-          if (tableName === 'users' && upsertErr.includes('users_username_key')) {
-            throw new Error('Username already exists in the database. Please use a unique username.');
-          } else {
-            console.error(`[DB] saveEntity upsert failed for ${tableName}:`, upsertErr);
-            throw new Error(`Supabase sync error (${tableName}): ${upsertErr}`);
-          }
+    if (sanitized.length > 0) {
+      const upsertErr = await this.upsertBatch(tableName, sanitized);
+      if (upsertErr) {
+        if (tableName === 'users' && upsertErr.includes('users_username_key')) {
+          throw new Error('Username already exists in the database. Please use a unique username.');
+        } else {
+          console.error(`[DB] saveEntity upsert failed for ${tableName}:`, upsertErr);
+          throw new Error(`Supabase sync error (${tableName}): ${upsertErr}`);
         }
-        console.log(`[DB] ${tableName}: upserted ${sanitized.length} rows`);
       }
-
-      // We intentionally DO NOT perform bulk deletes here to ensure multi-user safety.
-      // Use deleteRecord() for explicit removals.
-      console.log(`[DB] ${tableName}: sync complete`);
-    } catch (err) {
-      console.error(`[DB] saveEntity(${tableName}) crash:`, err);
+      console.log(`[DB] ${tableName}: upserted ${sanitized.length} rows`);
     }
+
+    // Mark write timestamp so background refreshes don't overwrite this data
+    this.lastWriteTimestamp = Date.now();
+    console.log(`[DB] ${tableName}: sync complete`);
   }
 
   static async deleteRecord(tableName: string, id: string): Promise<void> {

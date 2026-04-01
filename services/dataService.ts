@@ -252,7 +252,7 @@ export class DataService {
       try { localStorage.removeItem(storageKey); } catch {}
     }
 
-    if (!supabase) return;
+    console.log(`[DB] saveEntity: syncing ${data.length} rows to ${tableName}`);
 
     // Mark write timestamp BEFORE the upsert so background refreshes are
     // blocked for the entire duration of the upload, not just after it.

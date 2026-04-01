@@ -1,62 +1,45 @@
-import { ScheduleEntry, Faculty, Clash, Course, Room, StudentGroup, Term, UserAccount } from '../types';
+import { ScheduleEntry, Faculty, Clash } from '../types';
 import { supabase } from './supabase';
 
+// ─── Schema whitelist ─────────────────────────────────────────────────────────
+// Only these columns are sent to Supabase. Any extra React-only fields are stripped.
+const SCHEMA: Record<string, string[]> = {
+  users:     ['id', 'username', 'password', 'name', 'role', 'departmentScope', 'lastLogin'],
+  terms:     ['id', 'name', 'startDate', 'endDate', 'academicYear', 'isActive'],
+  courses:   ['id', 'termId', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
+  faculties: ['id', 'facultyId', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],
+  rooms:     ['id', 'termId', 'name', 'capacity', 'type'],
+  groups:    ['id', 'termId', 'name', 'program', 'semester', 'studentCount'],
+  schedule:  ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category'],
+};
+
+// Term-scoped tables — all reads/writes are filtered by termId
+const TERM_SCOPED = new Set(['courses', 'faculties', 'rooms', 'groups', 'schedule']);
+
 export class DataService {
-  private static STORAGE_KEY = 'unitime_full_dataset';
+  private static SCHEDULE_KEY = 'unitime_full_dataset';
 
-  // ✅ FIX: Schema whitelist now matches EXACT Supabase column names (quoted camelCase)
-  private static SCHEMA_WHITELIST: Record<string, string[]> = {
-    users:    ['id', 'username', 'password', 'name', 'role', 'departmentScope', 'lastLogin'],
-    terms:    ['id', 'name', 'startDate', 'endDate', 'academicYear', 'isActive'],
-    courses:  ['id', 'termId', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
-    faculties:['id', 'facultyId', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],
-    rooms:    ['id', 'termId', 'name', 'capacity', 'type'],
-    groups:   ['id', 'termId', 'name', 'program', 'semester', 'studentCount'],
-    schedule: ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category']
-  };
+  // ─── Private helpers ────────────────────────────────────────────────────────
 
-  // ✅ FIX: Sanitize item to only allowed keys, with termId injected
-  private static sanitizeItem(tableName: string, item: any, termId?: string | null): any {
-    const schema = this.SCHEMA_WHITELIST[tableName] || [];
-    const newItem: any = {};
-    schema.forEach(key => {
-      // ✅ Allow both camelCase and database fields (like _module_id) temporarily
-      // but prioritize the schema whitelist for Supabase compatibility.
-      if (item[key] !== undefined) newItem[key] = item[key];
-    });
-
-    // 🚀 STRENGTHEN RELATIONSHIPS: Ensure termId is ALWAYS stamped if provided.
-    // This is the primary key for all filtered queries and prevents data "vanishing".
-    if (termId && tableName !== 'users' && tableName !== 'terms') {
-      newItem.termId = termId;
-    }
-    
-    // Fix bad lastLogin values
-    if (tableName === 'users' && newItem.lastLogin) {
-      if (!newItem.lastLogin || newItem.lastLogin.length < 5) newItem.lastLogin = null;
-    }
-
-    // ✅ DEBUG: Log potentially malformed items
-    if (!newItem.id && tableName !== 'users') {
-      console.warn(`[DataService] Item in ${tableName} is missing an ID!`, item);
-    }
-
-    return newItem;
+  private static sanitize(tableName: string, item: any, termId?: string | null): any {
+    const cols = SCHEMA[tableName] || [];
+    const out: any = {};
+    cols.forEach(k => { if (item[k] !== undefined) out[k] = item[k]; });
+    if (termId && TERM_SCOPED.has(tableName)) out.termId = termId;
+    if (tableName === 'users' && out.lastLogin && out.lastLogin.length < 5) out.lastLogin = null;
+    return out;
   }
 
-  // =========================================================
-  // SCHEDULE
-  // =========================================================
-  // Fetch all rows from a Supabase table, paginating past the default 1000-row limit.
+  // Paginate past Supabase's 1000-row SELECT limit
   private static async fetchAllPages<T>(
     buildQuery: (from: number, to: number) => any
-  ): Promise<{ data: T[] | null; error: any }> {
+  ): Promise<{ data: T[]; error: any }> {
     const PAGE = 1000;
     const all: T[] = [];
     let from = 0;
     while (true) {
       const { data, error } = await buildQuery(from, from + PAGE - 1);
-      if (error) return { data: null, error };
+      if (error) return { data: [], error };
       if (!data || data.length === 0) break;
       all.push(...data);
       if (data.length < PAGE) break;
@@ -65,184 +48,232 @@ export class DataService {
     return { data: all, error: null };
   }
 
-  static async loadAllEntries(termId?: string): Promise<ScheduleEntry[]> {
-    try {
-      if (supabase) {
-        const { data, error } = await this.fetchAllPages<ScheduleEntry>((from, to) => {
-          let q = supabase!.from('schedule').select('*').range(from, to);
-          if (termId) q = q.eq('termId', termId);
-          return q;
-        });
-        if (!error && data) return data;
-        if (error) console.warn('Supabase loadAllEntries error:', error);
-      }
-    } catch (err) {
-      console.error('DataService.loadAllEntries crash:', err);
+  private static async upsertBatch(tableName: string, rows: any[]): Promise<string | null> {
+    const BATCH = 500;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await supabase!.from(tableName).upsert(rows.slice(i, i + BATCH), { onConflict: 'id' });
+      if (error) return error.message;
     }
-
-    // Fallback: localStorage
-    try {
-      const saved = localStorage.getItem(this.STORAGE_KEY);
-      let entries: ScheduleEntry[] = saved ? JSON.parse(saved) : [];
-      if (!Array.isArray(entries)) entries = [];
-      if (termId) return entries.filter(e => e.termId === termId);
-      return entries;
-    } catch {
-      return [];
-    }
+    return null;
   }
 
-  static async saveEntries(entries: ScheduleEntry[], termId?: string): Promise<void> {
-    // Always save to localStorage first (instant, no network)
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(entries));
+  // ─── Core fetch ────────────────────────────────────────────────────────────
+  // Supabase is the single source of truth.
+  // If 0 rows returned for the active term, checks if data exists under ANY termId
+  // and auto-migrates it — fixes the "data in Supabase but 0 in app" problem permanently.
 
-    try {
-      if (supabase) {
-        const sanitized = entries.map(e => this.sanitizeItem('schedule', e, termId || e.termId));
-
-        // ✅ NEW: Upsert first, then delete. This ensures no "vanishing" window.
-        if (sanitized.length > 0) {
-          const BATCH = 500;
-          for (let i = 0; i < sanitized.length; i += BATCH) {
-            const { error } = await supabase.from('schedule').upsert(sanitized.slice(i, i + BATCH), { onConflict: 'id' });
-            if (error) { console.error('Failed to upsert schedule batch:', error); break; }
-          }
-          console.log(`Schedule upserted to Supabase (${sanitized.length} entries).`);
-        }
-
-        // Surgical Delete: only if termId provided, remove items that are NOT in the new list.
-        // This is safer than a blanket delete because it only happens AFTER successful upsert.
-        if (termId) {
-          const newIds = sanitized.map(s => s.id);
-          if (newIds.length > 0) {
-            // Chunked delete to avoid URL length limits
-            const CHUNK = 100;
-            for (let i = 0; i < newIds.length; i += CHUNK) {
-              const ids = newIds.slice(i, i + CHUNK);
-              // Note: We can't easily do "not in" with chunking in a single query.
-              // For simplicity and safety, we rely on the fact that most edits use 
-              // addEntries/updateEntry/deleteEntry which are already surgical.
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.error('DataService.saveEntries crash:', err);
-    }
-  }
-
-  // ── Granular per-row operations (safe for multi-user concurrent editing) ────
-  // These only touch the specific rows that changed, so concurrent users
-  // never overwrite each other's work.
-
-  static async addEntries(newEntries: ScheduleEntry[], allEntries: ScheduleEntry[]): Promise<void> {
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allEntries));
-    if (!supabase || newEntries.length === 0) return;
-    try {
-      const sanitized = newEntries.map(e => this.sanitizeItem('schedule', e, e.termId));
-      const { error } = await supabase.from('schedule').upsert(sanitized, { onConflict: 'id' });
-      if (error) console.error('DataService.addEntries error:', error);
-      else console.log(`Added ${newEntries.length} schedule entry(ies).`);
-    } catch (err) {
-      console.error('DataService.addEntries crash:', err);
-    }
-  }
-
-  static async updateEntry(entry: ScheduleEntry, allEntries: ScheduleEntry[]): Promise<void> {
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allEntries));
-    if (!supabase) return;
-    try {
-      const sanitized = this.sanitizeItem('schedule', entry, entry.termId);
-      const { error } = await supabase.from('schedule').upsert([sanitized], { onConflict: 'id' });
-      if (error) console.error('DataService.updateEntry error:', error);
-      else console.log(`Updated schedule entry ${entry.id}.`);
-    } catch (err) {
-      console.error('DataService.updateEntry crash:', err);
-    }
-  }
-
-  static async deleteEntry(id: string, allEntries: ScheduleEntry[]): Promise<void> {
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allEntries));
-    if (!supabase) return;
-    try {
-      const { error } = await supabase.from('schedule').delete().eq('id', id);
-      if (error) console.error('DataService.deleteEntry error:', error);
-      else console.log(`Deleted schedule entry ${id}.`);
-    } catch (err) {
-      console.error('DataService.deleteEntry crash:', err);
-    }
-  }
-
-  // ── Supabase-only reads (used in realtime callbacks) ────────────────────────
-  // These never fall back to localStorage. If Supabase is unavailable or returns
-  // an error they return null, so callers can skip the state update and keep the
-  // current (correct) state rather than overwriting it with stale/mock data.
-
-  static async loadFromSupabaseOnly<T>(tableName: string, termId?: string): Promise<T[] | null> {
+  static async fetchTable<T>(tableName: string, termId?: string): Promise<T[] | null> {
     if (!supabase) return null;
     try {
       const { data, error } = await this.fetchAllPages<T>((from, to) => {
         let q = supabase!.from(tableName).select('*').range(from, to);
-        if (termId && tableName !== 'users' && tableName !== 'terms') {
-          q = q.eq('termId', termId);
-        }
+        if (termId && TERM_SCOPED.has(tableName)) q = q.eq('termId', termId);
         return q;
       });
-      if (error) { console.warn(`loadFromSupabaseOnly(${tableName}) error:`, error); return null; }
-      return data as T[];
+
+      if (error) {
+        console.error(`[DB] fetch ${tableName} failed:`, error);
+        return null;
+      }
+
+      // Auto-migrate: if 0 rows for this term but data exists elsewhere, re-tag it all
+      if (data.length === 0 && termId && TERM_SCOPED.has(tableName)) {
+        const { data: all, error: allErr } = await this.fetchAllPages<any>((from, to) =>
+          supabase!.from(tableName).select('*').range(from, to)
+        );
+        if (!allErr && all.length > 0) {
+          console.log(`[DB] Auto-migrating ${all.length} ${tableName} rows → termId ${termId}`);
+          const sanitized = all.map((r: any) => this.sanitize(tableName, r, termId));
+          const err = await this.upsertBatch(tableName, sanitized);
+          if (err) {
+            console.error(`[DB] Auto-migrate upsert failed for ${tableName}:`, err);
+            return all as T[]; // return original even if upsert failed
+          }
+          return all.map((r: any) => ({ ...r, termId })) as T[];
+        }
+      }
+
+      console.log(`[DB] ${tableName}: loaded ${data.length} rows${termId ? ` (term ${termId})` : ''}`);
+      return data;
     } catch (err) {
-      console.error(`loadFromSupabaseOnly(${tableName}) crash:`, err);
+      console.error(`[DB] fetchTable(${tableName}) crash:`, err);
       return null;
     }
+  }
+
+  // ─── Entity load (with localStorage cold-start cache for terms only) ────────
+  // For terms: try Supabase, fall back to localStorage cache so the app renders
+  //   immediately without a blank screen on cold start.
+  // For all other tables: Supabase only — localStorage caused stale/ghost data bugs.
+
+  static async loadEntity<T>(
+    tableName: string,
+    storageKey: string,
+    defaultValue: T[],
+    termId?: string
+  ): Promise<T[]> {
+    const fromSupabase = await this.fetchTable<T>(tableName, termId);
+
+    if (fromSupabase !== null) {
+      // Cache only terms (used for cold-start render) — never cache user-sensitive data
+      if (tableName === 'terms') {
+        try { localStorage.setItem(storageKey, JSON.stringify(fromSupabase)); } catch {}
+      }
+      return fromSupabase;
+    }
+
+    // Supabase failed — use localStorage cache only for terms
+    if (tableName === 'terms') {
+      try {
+        const cached = localStorage.getItem(storageKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed as T[];
+        }
+      } catch {}
+    }
+
+    return defaultValue;
+  }
+
+  // ─── Schedule load ──────────────────────────────────────────────────────────
+
+  static async loadAllEntries(termId?: string): Promise<ScheduleEntry[]> {
+    const data = await this.fetchTable<ScheduleEntry>('schedule', termId);
+    if (data !== null) return data;
+    // localStorage fallback for schedule only
+    try {
+      const saved = localStorage.getItem(this.SCHEDULE_KEY);
+      let entries: ScheduleEntry[] = saved ? JSON.parse(saved) : [];
+      if (!Array.isArray(entries)) return [];
+      return termId ? entries.filter(e => e.termId === termId) : entries;
+    } catch { return []; }
+  }
+
+  // Supabase-only reads — return null on any failure (callers skip state update)
+  static async loadFromSupabaseOnly<T>(tableName: string, termId?: string): Promise<T[] | null> {
+    return this.fetchTable<T>(tableName, termId);
   }
 
   static async loadAllEntriesFromSupabase(termId?: string): Promise<ScheduleEntry[] | null> {
-    if (!supabase) return null;
-    try {
-      const { data, error } = await this.fetchAllPages<ScheduleEntry>((from, to) => {
-        let q = supabase!.from('schedule').select('*').range(from, to);
-        if (termId) q = q.eq('termId', termId);
-        return q;
-      });
-      if (error) { console.warn('loadAllEntriesFromSupabase error:', error); return null; }
-      return data;
-    } catch (err) {
-      console.error('loadAllEntriesFromSupabase crash:', err);
-      return null;
-    }
+    return this.fetchTable<ScheduleEntry>('schedule', termId);
   }
 
-  // Wipe all schedule entries for a term (or all terms if no termId).
-  // Used by admin "Clear Schedule" — does NOT call saveEntries so it won't
-  // re-upload the old full array; it just deletes the rows directly.
-  static async clearSchedule(termId?: string): Promise<void> {
-    try {
-      const saved = localStorage.getItem(this.STORAGE_KEY);
-      let entries: ScheduleEntry[] = saved ? JSON.parse(saved) : [];
-      entries = termId ? entries.filter((e: any) => e.termId !== termId) : [];
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(entries));
-    } catch {}
+  // ─── Entity save ────────────────────────────────────────────────────────────
+  // Upsert-first strategy: never DELETE before INSERT so there is no empty window.
+  // Surgical cleanup of removed rows runs after the upsert succeeds.
 
-    if (!supabase) return;
-    try {
-      const { error } = termId
-        ? await supabase.from('schedule').delete().eq('termId', termId)
-        : await supabase.from('schedule').delete().neq('id', '');
-      if (error) throw new Error(error.message);
-      console.log(`Schedule cleared${termId ? ` for term ${termId}` : ' (all terms)'}.`);
-    } catch (err) {
-      throw err;
-    }
-  }
-
-  // Wipe all rows for any term-scoped entity table (courses, faculties, rooms, groups).
-  // Unlike saveEntity, this ONLY deletes — no upsert, no confirm-after-save side-effects.
-  // Used by the admin "Wipe" button so a silent DELETE failure can't restore old data via re-read.
-  static async clearEntity(
+  static async saveEntity<T extends { id: string; termId?: string }>(
     tableName: string,
     storageKey: string,
-    termId: string
+    data: T[],
+    termId?: string
   ): Promise<void> {
+    // Users are never cached locally — Supabase is the only truth for users
+    if (tableName !== 'users') {
+      try { localStorage.setItem(storageKey, JSON.stringify(data)); } catch {}
+    } else {
+      try { localStorage.removeItem(storageKey); } catch {}
+    }
+
+    if (!supabase) return;
+
+    try {
+      const isTermScoped = !!(termId && TERM_SCOPED.has(tableName));
+      let itemsToSync = isTermScoped
+        ? data.filter((item: any) => item.termId === termId || !item.termId)
+        : data;
+
+      const sanitized = itemsToSync.map(item => this.sanitize(tableName, item, termId));
+
+      if (sanitized.length > 0) {
+        const upsertErr = await this.upsertBatch(tableName, sanitized);
+        if (upsertErr) {
+          // Username conflict — retry one-by-one skipping duplicates
+          if (tableName === 'users' && upsertErr.includes('users_username_key')) {
+            for (const row of sanitized) {
+              const { error } = await supabase.from(tableName).upsert([row], { onConflict: 'id' });
+              if (error && !error.message.includes('users_username_key')) {
+                console.error(`[DB] User upsert failed for ${row.username}:`, error.message);
+              }
+            }
+          } else {
+            console.error(`[DB] saveEntity upsert failed for ${tableName}:`, upsertErr);
+            alert(`Supabase sync error (${tableName}): ${upsertErr}`);
+            return;
+          }
+        }
+        console.log(`[DB] ${tableName}: upserted ${sanitized.length} rows`);
+      }
+
+      // Surgical delete: remove rows no longer in the list (only for manageable sizes)
+      const currentIds = sanitized.map((r: any) => r.id);
+      if (isTermScoped && currentIds.length > 0 && currentIds.length <= 200) {
+        const safeList = `(${currentIds.map(id => `"${id}"`).join(',')})`;
+        const { error } = await supabase.from(tableName).delete()
+          .eq('termId', termId!).not('id', 'in', safeList);
+        if (error) console.warn(`[DB] Surgical delete warning for ${tableName}:`, error.message);
+      } else if (!isTermScoped && data.length === 0) {
+        await supabase.from(tableName).delete().neq('id', '');
+      } else if (!isTermScoped && currentIds.length > 0 && currentIds.length <= 200) {
+        const safeList = `(${currentIds.map(id => `"${id}"`).join(',')})`;
+        const { error } = await supabase.from(tableName).delete().not('id', 'in', safeList);
+        if (error) console.warn(`[DB] Surgical delete (global) warning for ${tableName}:`, error.message);
+      }
+
+      console.log(`[DB] ${tableName}: sync complete`);
+    } catch (err) {
+      console.error(`[DB] saveEntity(${tableName}) crash:`, err);
+    }
+  }
+
+  // ─── Schedule granular operations (multi-user safe) ──────────────────────────
+  // Each method only touches the specific rows that changed.
+
+  static async addEntries(newEntries: ScheduleEntry[], allEntries: ScheduleEntry[]): Promise<void> {
+    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
+    if (!supabase || newEntries.length === 0) return;
+    const sanitized = newEntries.map(e => this.sanitize('schedule', e, e.termId));
+    const { error } = await supabase.from('schedule').upsert(sanitized, { onConflict: 'id' });
+    if (error) console.error('[DB] addEntries error:', error.message);
+    else console.log(`[DB] schedule: added ${newEntries.length} entries`);
+  }
+
+  static async updateEntry(entry: ScheduleEntry, allEntries: ScheduleEntry[]): Promise<void> {
+    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
+    if (!supabase) return;
+    const sanitized = this.sanitize('schedule', entry, entry.termId);
+    const { error } = await supabase.from('schedule').upsert([sanitized], { onConflict: 'id' });
+    if (error) console.error('[DB] updateEntry error:', error.message);
+    else console.log(`[DB] schedule: updated entry ${entry.id}`);
+  }
+
+  static async deleteEntry(id: string, allEntries: ScheduleEntry[]): Promise<void> {
+    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
+    if (!supabase) return;
+    const { error } = await supabase.from('schedule').delete().eq('id', id);
+    if (error) console.error('[DB] deleteEntry error:', error.message);
+    else console.log(`[DB] schedule: deleted entry ${id}`);
+  }
+
+  // ─── Clear operations ───────────────────────────────────────────────────────
+
+  static async clearSchedule(termId?: string): Promise<void> {
+    try {
+      const saved = localStorage.getItem(this.SCHEDULE_KEY);
+      let entries: ScheduleEntry[] = saved ? JSON.parse(saved) : [];
+      entries = termId ? entries.filter((e: any) => e.termId !== termId) : [];
+      localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(entries));
+    } catch {}
+    if (!supabase) return;
+    const { error } = termId
+      ? await supabase.from('schedule').delete().eq('termId', termId)
+      : await supabase.from('schedule').delete().neq('id', '');
+    if (error) throw new Error(error.message);
+    console.log(`[DB] schedule: cleared${termId ? ` for term ${termId}` : ' (all)'}`);
+  }
+
+  static async clearEntity(tableName: string, storageKey: string, termId: string): Promise<void> {
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
@@ -251,40 +282,20 @@ export class DataService {
         localStorage.setItem(storageKey, JSON.stringify(remaining));
       }
     } catch {}
-
     if (!supabase) return;
-
-    // ✅ FIX: Delete dependent schedule records first to satisfy DB foreign key constraints.
-    // Tables like courses, faculties, and rooms are referenced by the schedule table.
-    // If we don't clear the schedule for this term first, the DELETE on the registry will fail.
-    try {
-      if (['courses', 'faculties', 'rooms', 'groups'].includes(tableName)) {
-        const { error: scheduleError } = await supabase.from('schedule').delete().eq('termId', termId);
-        if (scheduleError) {
-          console.warn(`[DataService] Non-fatal: Pre-wipe schedule clear failed for ${tableName}:`, scheduleError);
-        } else {
-          console.log(`[DataService] Pre-emptively cleared schedule for term ${termId} to satisfy constraints.`);
-          // Update local schedule storage too
-          const savedSchedule = localStorage.getItem(this.STORAGE_KEY);
-          if (savedSchedule) {
-            const allSchedules = JSON.parse(savedSchedule);
-            const remainingSchedules = Array.isArray(allSchedules) ? allSchedules.filter((s: any) => s.termId !== termId) : [];
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(remainingSchedules));
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`[DataService] Pre-wipe schedule cleanup crash for ${tableName}:`, e);
+    // Clear schedule first (foreign key constraint)
+    if (TERM_SCOPED.has(tableName) && tableName !== 'schedule') {
+      const { error: sErr } = await supabase.from('schedule').delete().eq('termId', termId);
+      if (sErr) console.warn(`[DB] Pre-wipe schedule clear warning for ${tableName}:`, sErr.message);
+      else console.log(`[DB] Pre-wipe: cleared schedule for term ${termId}`);
     }
-
     const { error } = await supabase.from(tableName).delete().eq('termId', termId);
     if (error) throw new Error(`Failed to wipe ${tableName}: ${error.message}`);
-    console.log(`${tableName} wiped for term ${termId}.`);
+    console.log(`[DB] ${tableName}: wiped for term ${termId}`);
   }
 
-  // Re-tag all existing entity data with a new termId.
-  // Use this when data was uploaded under a different term (e.g. mock term 't1')
-  // and needs to be linked to the real active term without re-uploading everything.
+  // ─── Migration ──────────────────────────────────────────────────────────────
+
   static async migrateDataToTerm(newTermId: string): Promise<{ [table: string]: number }> {
     if (!supabase) throw new Error('Supabase not configured');
     const tables = [
@@ -294,245 +305,29 @@ export class DataService {
       { name: 'groups',    storageKey: 'unitime_groups' },
     ];
     const counts: { [table: string]: number } = {};
-    for (const { name, storageKey } of tables) {
+    for (const { name } of tables) {
       const { data, error } = await this.fetchAllPages<any>((from, to) =>
         supabase!.from(name).select('*').range(from, to)
       );
-      if (error || !data) { counts[name] = 0; continue; }
-      if (data.length === 0) { counts[name] = 0; continue; }
-      const updated = data.map((row: any) => ({ ...row, termId: newTermId }));
-      const BATCH = 500;
-      for (let i = 0; i < updated.length; i += BATCH) {
-        const { error: upsertErr } = await supabase.from(name).upsert(
-          updated.slice(i, i + BATCH).map((r: any) => this.sanitizeItem(name, r, newTermId)),
-          { onConflict: 'id' }
-        );
-        if (upsertErr) throw new Error(`Migration failed for ${name}: ${upsertErr.message}`);
-      }
-      try { localStorage.setItem(storageKey, JSON.stringify(updated)); } catch {}
+      if (error || !data || data.length === 0) { counts[name] = 0; continue; }
+      const sanitized = data.map((r: any) => this.sanitize(name, r, newTermId));
+      const err = await this.upsertBatch(name, sanitized);
+      if (err) throw new Error(`Migration failed for ${name}: ${err}`);
       counts[name] = data.length;
+      console.log(`[DB] Migrated ${data.length} ${name} rows → term ${newTermId}`);
     }
     return counts;
   }
 
-  // =========================================================
-  // GENERIC ENTITY LOAD
-  // =========================================================
-  static async loadEntity<T>(tableName: string, storageKey: string, defaultValue: T[], termId?: string): Promise<T[]> {
-    try {
-      if (supabase) {
-        const { data, error } = await this.fetchAllPages<T>((from, to) => {
-          let q = supabase!.from(tableName).select('*').range(from, to);
-          if (termId && tableName !== 'users' && tableName !== 'terms') {
-            q = q.eq('termId', termId);
-          }
-          return q;
-        });
-        if (!error && data) {
-          console.log(`[DataService] Loaded ${data.length} items for ${tableName} from Supabase.`);
+  // ─── Utilities ──────────────────────────────────────────────────────────────
 
-          // Auto-migrate: if 0 results for this term but rows exist under a different termId,
-          // re-tag them all to the current termId so data is never invisible after term changes.
-          if (data.length === 0 && termId && tableName !== 'users' && tableName !== 'terms') {
-            const { data: allRows } = await this.fetchAllPages<any>((from, to) =>
-              supabase!.from(tableName).select('*').range(from, to)
-            );
-            if (allRows && allRows.length > 0) {
-              console.log(`[DataService] Auto-migrating ${allRows.length} ${tableName} rows to term ${termId}`);
-              const sanitized = allRows.map((r: any) => this.sanitizeItem(tableName, r, termId));
-              const BATCH = 500;
-              for (let i = 0; i < sanitized.length; i += BATCH) {
-                await supabase!.from(tableName).upsert(sanitized.slice(i, i + BATCH), { onConflict: 'id' });
-              }
-              const migrated = allRows.map((r: any) => ({ ...r, termId }));
-              try { localStorage.setItem(storageKey, JSON.stringify(migrated)); } catch {}
-              return migrated as T[];
-            }
-          }
-
-          return data as T[];
-        }
-
-        // If termId column missing, retry without filter
-        if (error && (error.message.includes('termId') || error.code === '42703')) {
-          console.warn(`termId column missing for ${tableName}, retrying without filter...`);
-          const { data: fallback, error: fallbackErr } = await this.fetchAllPages<T>((from, to) =>
-            supabase!.from(tableName).select('*').range(from, to)
-          );
-          if (!fallbackErr && fallback) return fallback as T[];
-        }
-        if (error) console.warn(`Supabase loadEntity(${tableName}) error:`, error);
-      }
-    } catch (err) {
-      console.error(`DataService.loadEntity(${tableName}) crash:`, err);
-    }
-
-    // Fallback: localStorage
-    try {
-      const saved = localStorage.getItem(storageKey);
-      let data: any[] = saved ? JSON.parse(saved) : defaultValue;
-      if (!Array.isArray(data)) data = defaultValue as any[];
-      if (termId && tableName !== 'users' && tableName !== 'terms') {
-        // ✅ Strict isolation: only return items explicitly tagged to this term
-        // Items with no termId are legacy data — exclude them for clean isolation
-        return data.filter((item: any) => item.termId === termId) as T[];
-      }
-      return data as T[];
-    } catch {
-      return defaultValue;
-    }
-  }
-
-  // =========================================================
-  // GENERIC ENTITY SAVE
-  // =========================================================
-  static async saveEntity<T extends { id: string; termId?: string }>(
-    tableName: string,
-    storageKey: string,
-    data: T[],
-    termId?: string
-  ): Promise<void> {
-    // Save to localStorage for all tables EXCEPT users.
-    // Users must never be cached locally — Supabase is the single source of truth.
-    // Caching caused deleted users to reappear as ghosts on the login screen.
-    if (tableName !== 'users') {
-      localStorage.setItem(storageKey, JSON.stringify(data));
-    } else {
-      localStorage.removeItem(storageKey); // always clear any stale user cache
-    }
-
-    if (!supabase) return;
-
-    try {
-      // Only sync items belonging to this term (if termId provided)
-      let itemsToSync = data;
-      if (termId && tableName !== 'users' && tableName !== 'terms') {
-        itemsToSync = data.filter((item: any) => item.termId === termId || !item.termId);
-      }
-
-      if (itemsToSync.length === 0 && data.length > 0 && termId) {
-        console.warn(`No items matched termId ${termId} for ${tableName}, but data was provided. This might be a tagging issue.`);
-      }
-
-      const sanitized = itemsToSync.map(item => this.sanitizeItem(tableName, item, termId));
-
-      const isTermScoped = !!(termId && tableName !== 'users' && tableName !== 'terms');
-
-      if (isTermScoped) {
-        // ── Term-scoped tables (courses, faculties, rooms, groups) ──────────────
-        // Strategy: UPSERT first, then surgically DELETE items not in the list.
-        // This avoids the "vanishing" window where the table is empty.
-        
-        if (sanitized.length > 0) {
-          const BATCH = 500;
-          let batchError: any = null;
-          for (let i = 0; i < sanitized.length; i += BATCH) {
-            const chunk = sanitized.slice(i, i + BATCH);
-            const { error: chunkErr } = await supabase.from(tableName).upsert(chunk, { onConflict: 'id' });
-            if (chunkErr) { batchError = chunkErr; break; }
-          }
-
-          if (batchError) {
-             console.error(`Upsert failed for ${tableName}:`, batchError);
-             alert(`Supabase Sync Error (${tableName}): ${batchError.message}`);
-          } else {
-            console.log(`${tableName} synced to Supabase (${sanitized.length} rows).`);
-            
-            // Surgical Sync: Delete items that are in Supabase for this term but NOT in our new list.
-            const currentIds = sanitized.map(item => item.id);
-            if (currentIds.length > 0) {
-              // ✅ FIX 2: Handle URL length limits (2k-8k chars). 600+ IDs exceed this.
-              // ✅ FIX 3: Fix special character bugs (like & or ,) by quoting the IDs.
-              try {
-                if (currentIds.length <= 200) {
-                  // PostgREST syntax for NOT IN requires the string (id1,id2) or ("id1","id2")
-                  // We'll use quoted IDs to handle special characters like ampersands or commas.
-                  const safeList = `(${currentIds.map(id => `"${id}"`).join(',')})`;
-                  const { error: syncDelError } = await supabase
-                    .from(tableName)
-                    .delete()
-                    .eq('termId', termId!)
-                    .not('id', 'in', safeList);
-                  if (syncDelError) console.warn(`Surgical delete sync error for ${tableName}:`, syncDelError);
-                } else {
-                  console.log(`[DataService] Large dataset (${currentIds.length} items). Skipping surgical delete to avoid URL length overflow.`);
-                }
-              } catch (e) {
-                console.warn(`Surgical delete sync crash for ${tableName}:`, e);
-              }
-            }
-          }
-        } else {
-          // If the list is truly empty, then we delete all for this term.
-          await supabase.from(tableName).delete().eq('termId', termId!);
-          console.log(`${tableName}: all rows cleared for term ${termId}.`);
-        }
-      } else {
-        // ── Non-term-scoped tables (users, terms) ────────────────────────────────
-        // Strategy: upsert by id, then delete rows that are no longer in the list.
-        const { error: upsertError } = await supabase
-          .from(tableName)
-          .upsert(sanitized, { onConflict: 'id' });
-
-        if (upsertError) {
-          if (tableName === 'users' && upsertError.message.includes('users_username_key')) {
-            // Username unique constraint violated — retry row-by-row, skipping conflicts.
-            console.warn('Username conflict detected — upserting users individually...');
-            let savedCount = 0;
-            for (const item of sanitized) {
-              const { error: rowErr } = await supabase.from(tableName).upsert([item], { onConflict: 'id' });
-              if (rowErr) {
-                if (rowErr.message.includes('users_username_key')) {
-                  console.warn(`Skipped user "${item.username}" — username already exists with a different id.`);
-                } else {
-                  console.error(`Failed to upsert user "${item.username}":`, rowErr);
-                }
-              } else {
-                savedCount++;
-              }
-            }
-            console.log(`Users synced individually: ${savedCount}/${sanitized.length} saved.`);
-          } else {
-            console.error(`Upsert failed for ${tableName}:`, upsertError);
-            alert(`Supabase Sync Error (${tableName}): ${upsertError.message}`);
-          }
-        } else {
-          console.log(`${tableName} upserted to Supabase.`);
-        }
-
-        // Delete rows that are no longer in our list.
-        const syncedIds = sanitized.map((item: any) => item.id);
-        if (syncedIds.length > 0) {
-          const { error: deleteError } = await supabase
-            .from(tableName)
-            .delete()
-            .not('id', 'in', `(${syncedIds.join(',')})`);
-          if (deleteError) console.warn(`Delete sync error for ${tableName}:`, deleteError);
-        } else if (data.length === 0) {
-          const { error: deleteAllError } = await supabase.from(tableName).delete();
-          if (deleteAllError) console.warn(`Full delete sync error for ${tableName}:`, deleteAllError);
-        }
-      }
-
-      console.log(`${tableName} synchronization complete.`);
-    } catch (err) {
-      console.error(`DataService.saveEntity(${tableName}) crash:`, err);
-    }
-  }
-
-  // =========================================================
-  // UTILITIES
-  // =========================================================
   static getDuration(start: string, end: string): number {
     if (!start || !end || !start.includes(':') || !end.includes(':')) return 0;
     try {
       const [sH, sM] = start.split(':').map(Number);
       const [eH, eM] = end.split(':').map(Number);
-      const duration = (eH + eM / 60) - (sH + sM / 60);
-      return isNaN(duration) ? 0 : Math.max(0, duration);
-    } catch {
-      return 0;
-    }
+      return Math.max(0, (eH + eM / 60) - (sH + sM / 60));
+    } catch { return 0; }
   }
 
   static detectConflicts(schedule: ScheduleEntry[], facultyList: Faculty[] = []): Clash[] {
@@ -544,37 +339,29 @@ export class DataService {
 
     for (const entry of schedule) {
       const weeks = Array.isArray(entry.weeks) ? entry.weeks : [];
-      const duration = DataService.getDuration(entry.startTime, entry.endTime);
-
+      const duration = this.getDuration(entry.startTime, entry.endTime);
       for (const week of weeks) {
         if (!entry.day || !entry.startTime) continue;
-        const baseKey = `${week}-${entry.day}-${entry.startTime}`;
+        const base = `${week}-${entry.day}-${entry.startTime}`;
 
-        const roomKey = `${baseKey}-room-${entry.roomId}`;
-        if (entry.roomId && roomMap.has(roomKey)) {
-          clashes.push({ type: 'Room', message: `Room Conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, roomMap.get(roomKey)!] });
-        } else if (entry.roomId) {
-          roomMap.set(roomKey, entry.id);
-        }
+        const rk = `${base}-room-${entry.roomId}`;
+        if (entry.roomId && roomMap.has(rk)) {
+          clashes.push({ type: 'Room', message: `Room conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, roomMap.get(rk)!] });
+        } else if (entry.roomId) roomMap.set(rk, entry.id);
 
-        const facultyKey = `${baseKey}-faculty-${entry.facultyId}`;
-        if (facultyMap.has(facultyKey)) {
-          clashes.push({ type: 'Faculty', message: `Faculty Conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, facultyMap.get(facultyKey)!] });
-        } else {
-          facultyMap.set(facultyKey, entry.id);
-        }
+        const fk = `${base}-faculty-${entry.facultyId}`;
+        if (facultyMap.has(fk)) {
+          clashes.push({ type: 'Faculty', message: `Faculty conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, facultyMap.get(fk)!] });
+        } else facultyMap.set(fk, entry.id);
 
         for (const gId of (entry.groupIds || [])) {
-          const groupKey = `${baseKey}-group-${gId}`;
-          if (groupMap.has(groupKey)) {
-            clashes.push({ type: 'Group', message: `Group Conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, groupMap.get(groupKey)!] });
-          } else {
-            groupMap.set(groupKey, entry.id);
-          }
+          const gk = `${base}-group-${gId}`;
+          if (groupMap.has(gk)) {
+            clashes.push({ type: 'Group', message: `Group conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, groupMap.get(gk)!] });
+          } else groupMap.set(gk, entry.id);
         }
 
-        const loadKey = `${week}-${entry.facultyId}`;
-        loadTracker.set(loadKey, (loadTracker.get(loadKey) || 0) + duration);
+        loadTracker.set(`${week}-${entry.facultyId}`, (loadTracker.get(`${week}-${entry.facultyId}`) || 0) + duration);
       }
     }
 
@@ -585,13 +372,12 @@ export class DataService {
         if (faculty && hours > faculty.maxHoursPerWeek) {
           clashes.push({
             type: 'LoadViolation',
-            message: `${faculty.name} is over capacity in Week ${week} (${hours.toFixed(1)}h / ${faculty.maxHoursPerWeek}h limit)`,
-            affectedIds: schedule.filter(s => s.facultyId === fId && (s.weeks || []).includes(Number(week))).map(s => s.id)
+            message: `${faculty.name} over capacity in Week ${week} (${hours.toFixed(1)}h / ${faculty.maxHoursPerWeek}h)`,
+            affectedIds: schedule.filter(s => s.facultyId === fId && (s.weeks || []).includes(Number(week))).map(s => s.id),
           });
         }
       });
     }
-
     return clashes;
   }
 }

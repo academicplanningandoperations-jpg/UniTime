@@ -172,18 +172,10 @@ const App: React.FC = () => {
       const debounceTimers: Record<string, any> = {};
       const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
         if (debounceTimers[tableName]) clearTimeout(debounceTimers[tableName]);
-        
-        // 2s debounce — gives Supabase time to finish batch commits before re-fetch.
+        // 2s debounce — coalesces rapid events (e.g. 500-row bulk insert fires 500 events).
+        // No isSyncingRef block here: confirm-after-save handles write correctness,
+        // and blocking caused missed refreshes when writes took >2s.
         debounceTimers[tableName] = setTimeout(async () => {
-          // ✅ FIX: Explicitly ignore incoming Supabase changes if we are currently
-          // performing a local write (isSyncingRef.current === true). 
-          // This prevents the "vanishing data" race condition where a DELETE 
-          // event from our own wipe-then-upsert cycle overwrites our local state 
-          // before the UPSERT part has finished and been committed.
-          if (isSyncingRef.current) {
-            console.log(`Ignoring realtime ${tableName} refresh: local sync in progress.`);
-            return;
-          }
           await refreshFn();
         }, 2000);
       };
@@ -255,25 +247,31 @@ const App: React.FC = () => {
   // Safety-net: reload all data every 30 seconds and on window focus.
   // This catches any missed realtime events (network blips, Supabase free-tier limits)
   // so data that appears to "vanish" will be recovered within 30 seconds at most.
+  // Full reload from Supabase — used by 30s polling and window focus.
+  // Uses loadEntity (not loadFromSupabaseOnly) so auto-migration runs if termId mismatches.
   const refreshAllData = async () => {
     if (!supabase) return;
     const termId = activeTermIdRef.current;
-    const [t, u, c, f, r, g, s] = await Promise.all([
-      DataService.loadFromSupabaseOnly<Term>('terms'),
-      DataService.loadFromSupabaseOnly<UserAccount>('users'),
-      DataService.loadFromSupabaseOnly<Course>('courses', termId),
-      DataService.loadFromSupabaseOnly<Faculty>('faculties', termId),
-      DataService.loadFromSupabaseOnly<Room>('rooms', termId),
-      DataService.loadFromSupabaseOnly<StudentGroup>('groups', termId),
-      DataService.loadAllEntriesFromSupabase(termId),
-    ]);
-    if (t !== null && t.length > 0) setTerms(t);
-    if (u !== null && u.length > 0) setUsers(u);
-    if (c !== null) setCourses(c);
-    if (f !== null) setFaculties(f);
-    if (r !== null) setRooms(r);
-    if (g !== null) setGroups(g);
-    if (s !== null) setScheduleAndRef(s);
+    try {
+      const [t, u, c, f, r, g, s] = await Promise.all([
+        DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS),
+        DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
+        DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId),
+        DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId),
+        DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId),
+        DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId),
+        DataService.loadAllEntries(termId),
+      ]);
+      if (t.length > 0) setTerms(t);
+      if (u.length > 0) setUsers(u);
+      setCourses(c);
+      setFaculties(f);
+      setRooms(r);
+      setGroups(g);
+      setScheduleAndRef(s);
+    } catch (err) {
+      console.error('[App] refreshAllData failed:', err);
+    }
   };
 
   useEffect(() => {
@@ -289,17 +287,13 @@ const App: React.FC = () => {
   // Helper: wraps any write operation so isSyncingRef blocks realtime re-fetches
   // for the full debounce window (2s) + a safety buffer (1s extra = 3s total).
   const withSync = async (fn: () => Promise<void>): Promise<void> => {
-    isSyncingRef.current = true;   // set immediately, not via React state
+    isSyncingRef.current = true;
     setIsSyncing(true);
     try {
       await fn();
     } finally {
       setIsSyncing(false);
-      // ✅ FIX: Increased safety buffer to 4s (from 2s).
-      // This ensures that even for large bulk uploads, the "Ignore realtime" guard
-      // stays active long enough for Supabase to finish its internal indexing
-      // and for all own-triggered Postgres events to be processed.
-      setTimeout(() => { isSyncingRef.current = false; }, 4000);
+      isSyncingRef.current = false;
     }
   };
 
@@ -599,7 +593,7 @@ const App: React.FC = () => {
       await DataService.saveEntity('faculties', 'unitime_faculties', faculties);
       await DataService.saveEntity('rooms', 'unitime_rooms', rooms);
       await DataService.saveEntity('groups', 'unitime_groups', groups);
-      await DataService.saveEntries(schedule);
+      await DataService.saveEntity('schedule', 'unitime_full_dataset', schedule as any[]);
       alert('Full System Sync Successful! All local data is now mirror-synced to Supabase.');
     } catch (err: any) {
       alert('Full Sync Failed: ' + (err.message || 'Unknown error during sequential migration.'));

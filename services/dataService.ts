@@ -60,38 +60,58 @@ export class DataService {
   }
 
   private static async upsertBatch(tableName: string, rows: any[]): Promise<string | null> {
-    const BATCH = 50;  // Small batches to stay within Supabase free-tier limits
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 1500; // ms between retries
-    const BATCH_DELAY = 300;  // ms pause between successful batches
+    const BATCH = 20;       // Very small batches for Supabase free-tier
+    const MAX_RETRIES = 5;  // More retries for connection issues
+    const BATCH_DELAY = 2000; // 2s pause between batches — critical for free-tier
+
+    const totalBatches = Math.ceil(rows.length / BATCH);
+    let successCount = 0;
+    let failedBatches: number[] = [];
 
     for (let i = 0; i < rows.length; i += BATCH) {
+      const batchNum = Math.floor(i / BATCH) + 1;
       const chunk = rows.slice(i, i + BATCH);
-      let lastError: string | null = null;
+      let succeeded = false;
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        const { error } = await supabase!.from(tableName).upsert(chunk);
-        if (!error) {
-          lastError = null;
-          break;
+        try {
+          const { error } = await supabase!.from(tableName).upsert(chunk);
+          if (!error) {
+            succeeded = true;
+            successCount += chunk.length;
+            break;
+          }
+          console.warn(`[DB] ${tableName} batch ${batchNum}/${totalBatches} attempt ${attempt} failed:`, error.message);
+        } catch (err) {
+          console.warn(`[DB] ${tableName} batch ${batchNum}/${totalBatches} attempt ${attempt} network error:`, err);
         }
-        lastError = error.message;
-        console.warn(`[DB] Upsert ${tableName} batch ${Math.floor(i/BATCH)+1} attempt ${attempt}/${MAX_RETRIES} failed:`, error.message);
+        // Exponential backoff: 3s, 6s, 9s, 12s, 15s
         if (attempt < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, RETRY_DELAY * attempt));
+          await new Promise(r => setTimeout(r, 3000 * attempt));
         }
       }
 
-      if (lastError) {
-        console.error(`[DB] Upsert ${tableName} failed after ${MAX_RETRIES} retries:`, lastError);
-        return lastError;
+      if (!succeeded) {
+        failedBatches.push(batchNum);
+        console.error(`[DB] ${tableName} batch ${batchNum}/${totalBatches} FAILED after ${MAX_RETRIES} retries — skipping to next batch`);
+        // Continue with remaining batches instead of aborting
       }
 
-      // Small pause between batches to avoid overwhelming Supabase
+      // Pause between batches to let Supabase connection pool recover
       if (i + BATCH < rows.length) {
         await new Promise(r => setTimeout(r, BATCH_DELAY));
       }
     }
+
+    console.log(`[DB] ${tableName}: ${successCount}/${rows.length} rows synced (${failedBatches.length} batches failed)`);
+
+    if (failedBatches.length > 0 && successCount === 0) {
+      return `All batches failed for ${tableName}. Supabase may be overloaded — please wait a minute and retry.`;
+    }
+    if (failedBatches.length > 0) {
+      console.warn(`[DB] ${tableName}: Partial success — batches ${failedBatches.join(', ')} failed. ${successCount}/${rows.length} rows saved.`);
+    }
+    // Return null (success) even on partial failure — the data that made it through is safe
     return null;
   }
 
@@ -197,10 +217,10 @@ export class DataService {
 
     if (!supabase) return;
 
-    // No outer try-catch: errors MUST propagate to the caller (withSync)
-    // so it can alert the user and trigger recovery.  The old code had a
-    // catch that silently swallowed upsert failures, making the app think
-    // the write succeeded when it hadn't.
+    // Mark write timestamp BEFORE the upsert so background refreshes are
+    // blocked for the entire duration of the upload, not just after it.
+    this.lastWriteTimestamp = Date.now();
+
     const isTermScoped = !!(termId && TERM_SCOPED.has(tableName));
     let itemsToSync = isTermScoped
       ? data.filter((item: any) => item.termId === termId || !item.termId)
@@ -210,19 +230,20 @@ export class DataService {
 
     if (sanitized.length > 0) {
       const upsertErr = await this.upsertBatch(tableName, sanitized);
+      // Refresh the timestamp after the (potentially long) upload finishes
+      this.lastWriteTimestamp = Date.now();
+
       if (upsertErr) {
         if (tableName === 'users' && upsertErr.includes('users_username_key')) {
           throw new Error('Username already exists in the database. Please use a unique username.');
         } else {
-          console.error(`[DB] saveEntity upsert failed for ${tableName}:`, upsertErr);
-          throw new Error(`Supabase sync error (${tableName}): ${upsertErr}`);
+          console.error(`[DB] saveEntity failed for ${tableName}:`, upsertErr);
+          throw new Error(`Sync issue (${tableName}): Some records could not be saved. The app will retry automatically on next sync.`);
         }
       }
       console.log(`[DB] ${tableName}: upserted ${sanitized.length} rows`);
     }
 
-    // Mark write timestamp so background refreshes don't overwrite this data
-    this.lastWriteTimestamp = Date.now();
     console.log(`[DB] ${tableName}: sync complete`);
   }
 

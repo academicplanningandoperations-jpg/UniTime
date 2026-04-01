@@ -47,7 +47,7 @@ const TermManagement: React.FC<TermManagementProps> = ({ terms, onUpdateTerms, c
         onUpdateTerms(updatedTerms);
       } else {
         const term: Term = {
-          id: `t-${Date.now()}`,
+          id: formData.name.trim(),
           name: formData.name,
           academicYear: formData.academicYear || '2024/25',
           startDate: formData.startDate,

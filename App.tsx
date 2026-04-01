@@ -54,13 +54,6 @@ const App: React.FC = () => {
   };
 
   const [isSyncing, setIsSyncing] = useState(false);
-  // True while initial loadData is running. Capped at 5s so a hanging Supabase
-  // connection never permanently disables the login button.
-  const [isInitializing, setIsInitializing] = useState(true);
-  useEffect(() => {
-    const cap = setTimeout(() => setIsInitializing(false), 5000);
-    return () => clearTimeout(cap);
-  }, []);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
   const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(() => {
     const isSkipped = localStorage.getItem('unitime_skip_supabase') === 'true';
@@ -171,7 +164,6 @@ const App: React.FC = () => {
         console.error('Initial data loading failed:', err);
       } finally {
         setIsSyncing(false);
-        setIsInitializing(false);
       }
     };
     loadData();
@@ -821,7 +813,7 @@ const App: React.FC = () => {
     }
   }, [activeTab, currentUser]);
 
-  if (!currentUser) return <Login onLogin={(user) => { setCurrentUser(user); resetUIState(); }} users={users} isInitializing={isInitializing} />;
+  if (!currentUser) return <Login onLogin={(user) => { setCurrentUser(user); resetUIState(); }} users={users} />;
   
   if (!isSupabaseConfigured) {
     return <SupabaseSetup onConfigured={() => {

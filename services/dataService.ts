@@ -64,13 +64,14 @@ export class DataService {
     rows: any[],
     onProgress?: (pct: number, synced: number, total: number) => void
   ): Promise<string | null> {
-    const BATCH = 2000;     // MASSIVE batch to perform the upload in 1-2 rapid requests
-    const MAX_RETRIES = 5;  // Retry on connection instability
-    const BATCH_DELAY = 1000; // 1 second delay between massive batches
+    const BATCH = 500;       // Safe middle ground: 500 rows per request
+    const MAX_RETRIES = 5;
+    const BATCH_DELAY = 1000;
 
     const totalBatches = Math.ceil(rows.length / BATCH);
     let successCount = 0;
     let failedBatches: number[] = [];
+    let firstError: any = null;
 
     for (let i = 0; i < rows.length; i += BATCH) {
       const batchNum = Math.floor(i / BATCH) + 1;
@@ -85,26 +86,36 @@ export class DataService {
             successCount += chunk.length;
             break;
           }
-          console.warn(`[DB] ${tableName} batch ${batchNum}/${totalBatches} attempt ${attempt} failed:`, error.message);
-        } catch (err) {
+          
+          if (!firstError) firstError = error;
+          const errMsg = `${error.message || 'Unknown error'} \n${error.details || ''} \nHint: ${error.hint || ''}`;
+          console.warn(`[DB] ${tableName} batch ${batchNum}/${totalBatches} attempt ${attempt} failed:`, errMsg);
+          
+          // DO NOT retry if it's a data validation / schema error (e.g. 23502 null value constraint, 22P02 invalid text representation)
+          // Only retry if it's a connection/timeout/network issue.
+          if (error.code && (error.code.startsWith('22') || error.code.startsWith('23') || error.code.startsWith('42'))) {
+            console.error(`[DB] FATAL schema/data error. Aborting retries for this batch.`);
+            break;
+          }
+
+        } catch (err: any) {
+          if (!firstError) firstError = err;
           console.warn(`[DB] ${tableName} batch ${batchNum}/${totalBatches} attempt ${attempt} network error:`, err);
         }
-        // Exponential backoff: 3s, 6s, 9s, 12s, 15s
+        
         if (attempt < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, 3000 * attempt));
+          await new Promise(r => setTimeout(r, 2000 * attempt));
         }
       }
 
       if (!succeeded) {
         failedBatches.push(batchNum);
-        console.error(`[DB] ${tableName} batch ${batchNum}/${totalBatches} FAILED after ${MAX_RETRIES} retries — skipping to next batch`);
+        console.error(`[DB] ${tableName} batch ${batchNum}/${totalBatches} completely FAILED`);
       }
 
-      // Report progress
       const pct = Math.round((batchNum / totalBatches) * 100);
       if (onProgress) onProgress(pct, successCount, rows.length);
 
-      // Pause between batches to let Supabase connection pool recover
       if (i + BATCH < rows.length) {
         await new Promise(r => setTimeout(r, BATCH_DELAY));
       }
@@ -113,12 +124,12 @@ export class DataService {
     console.log(`[DB] ${tableName}: ${successCount}/${rows.length} rows synced (${failedBatches.length} batches failed)`);
 
     if (failedBatches.length > 0 && successCount === 0) {
-      return `All batches failed for ${tableName}. Supabase may be overloaded — please wait a minute and retry.`;
+      const msg = firstError 
+        ? `${firstError.message || 'Unknown error'} (Code: ${firstError.code || 'N/A'}) \nDetails: ${firstError.details || 'None'}`
+        : 'Supabase network overloaded or connection reset';
+      return `All uploads failed for ${tableName}. Supabase says: \n\n${msg}`;
     }
-    if (failedBatches.length > 0) {
-      console.warn(`[DB] ${tableName}: Partial success — batches ${failedBatches.join(', ')} failed. ${successCount}/${rows.length} rows saved.`);
-    }
-    // Return null (success) even on partial failure — the data that made it through is safe
+    
     return null;
   }
 
@@ -246,7 +257,8 @@ export class DataService {
           throw new Error('Username already exists in the database. Please use a unique username.');
         } else {
           console.error(`[DB] saveEntity failed for ${tableName}:`, upsertErr);
-          throw new Error(`Sync issue (${tableName}): Some records could not be saved. The app will retry automatically on next sync.`);
+          // Changed: Throw the EXACT error given by upsertBatch so the UI alerts it
+          throw new Error(`Sync issue (${tableName}): \n\n${upsertErr}`);
         }
       }
       console.log(`[DB] ${tableName}: upserted ${sanitized.length} rows`);

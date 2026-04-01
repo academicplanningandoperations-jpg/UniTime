@@ -140,22 +140,27 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         return { ...termTag, ...item };
       });
 
-      // ✅ Keep other terms' data intact — only replace THIS term's data
+      const mergeData = (existing: any[], newItems: any[]) => {
+        const merged = [...existing];
+        newItems.forEach(item => {
+          const idx = merged.findIndex(e => e.id === item.id);
+          if (idx !== -1) merged[idx] = item;
+          else merged.push(item);
+        });
+        return merged;
+      };
+
       if (activeImportType === 'Modules') {
-        const other = courses.filter((c: any) => c.termId !== activeTermId);
-        onUploadCourses([...other, ...mappedData as any[]]);
+        onUploadCourses(mergeData(courses, mappedData as any[]));
       }
       if (activeImportType === 'Faculties') {
-        const other = faculties.filter((f: any) => f.termId !== activeTermId);
-        onUploadFaculties([...other, ...mappedData as any[]]);
+        onUploadFaculties(mergeData(faculties, mappedData as any[]));
       }
       if (activeImportType === 'Rooms') {
-        const other = rooms.filter((r: any) => r.termId !== activeTermId);
-        onUploadRooms([...other, ...mappedData as any[]]);
+        onUploadRooms(mergeData(rooms, mappedData as any[]));
       }
       if (activeImportType === 'Groups') {
-        const other = groups.filter((g: any) => g.termId !== activeTermId);
-        onUploadGroups([...other, ...mappedData as any[]]);
+        onUploadGroups(mergeData(groups, mappedData as any[]));
       }
 
       setLastUpload({ type: activeImportType, count: mappedData.length });

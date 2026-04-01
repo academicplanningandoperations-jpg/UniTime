@@ -109,7 +109,7 @@ const TopNav: React.FC<TopNavProps> = ({
         <NavItem icon={<BookOpen className="w-3.5 h-3.5" />} label="Module" onClick={() => onAddPanel?.('Course')} />
         <Separator />
         <NavItem icon={<LayoutGrid className="w-3.5 h-3.5" />} label="4-Up View" onClick={onAutoTile} />
-        <NavItem icon={<MapPin className="w-3.5 h-3.5" />} label="Room Finder" onClick={onRoomFinder} />
+        <NavItem icon={<MapPin className="w-3.5 h-3.5" />} label="Availability" onClick={onRoomFinder} />
         
         <div className="relative h-full flex items-center" ref={exportRef}>
           <button

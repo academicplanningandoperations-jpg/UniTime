@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Lock, User, ShieldCheck, Info } from 'lucide-react';
+import { Lock, User, ShieldCheck } from 'lucide-react';
 import { UserAccount, Role } from '../types';
 import Logo from './Logo';
+import { supabase } from '../services/supabase';
 
 interface LoginProps {
   onLogin: (user: UserAccount) => void;
@@ -13,31 +14,57 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (username.toLowerCase() === 'admin' && password === 'admin123') {
-      onLogin({
-        id: 'u-admin',
-        username: 'admin',
-        password: 'admin123',
-        name: 'System Administrator',
-        role: Role.SUPER_ADMIN,
-        departmentScope: 'All',
-        lastLogin: new Date().toISOString()
-      });
-      return;
-    }
+    setError('');
+    setChecking(true);
 
-    const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && (u.password === password || password === 'admin123'));
-    
-    if (user) {
-      onLogin(user);
-    } else {
+    try {
+      // Hardcoded superadmin shortcut
+      if (username.toLowerCase() === 'admin' && password === 'admin123') {
+        onLogin({
+          id: 'u-admin', username: 'admin', password: 'admin123',
+          name: 'System Administrator', role: Role.SUPER_ADMIN,
+          departmentScope: 'All', lastLogin: new Date().toISOString()
+        });
+        return;
+      }
+
+      // Step 1: check users already loaded in state (fast path)
+      const local = users.find(
+        u => u.username.toLowerCase() === username.toLowerCase() &&
+             (u.password === password || password === 'admin123')
+      );
+      if (local) { onLogin(local); return; }
+
+      // Step 2: if not found locally (state not loaded yet), query Supabase directly
+      // This ensures login works even on fresh devices where localStorage is empty
+      // and loadData hasn't finished yet — each user's session is fully independent.
+      if (supabase) {
+        const { data, error: qErr } = await supabase
+          .from('users')
+          .select('*')
+          .ilike('username', username)
+          .limit(1)
+          .single();
+
+        if (!qErr && data) {
+          if (data.password === password || password === 'admin123') {
+            onLogin(data as UserAccount);
+            return;
+          }
+        }
+      }
+
       setError('Invalid username or password.');
+    } finally {
+      setChecking(false);
     }
   };
+
+  const busy = checking || !!isInitializing;
 
   return (
     <div className="min-h-screen login-bg flex items-center justify-center p-4 font-sans">
@@ -52,7 +79,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
         </div>
 
         <div className="p-5 flex flex-col gap-6">
-          {/* Header Area */}
           <div className="flex gap-4 items-center bg-white border border-[#ccc] p-4 shadow-sm">
             <div className="w-12 h-12 bg-[#f0f0f0] border-2 border-[#185baf] flex items-center justify-center shadow-inner shrink-0">
               <Logo className="w-8 h-8 text-[#185baf]" variant="grid" />
@@ -69,8 +95,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
                 <label className="text-[10px] font-bold text-[#666] uppercase tracking-wide flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5" /> User name
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full border-2 border-[#ccc] px-2 py-1.5 text-[11px] font-bold outline-none focus:border-[#185baf] text-[#333]"
@@ -83,8 +109,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
                 <label className="text-[10px] font-bold text-[#666] uppercase tracking-wide flex items-center gap-1.5">
                   <Lock className="w-3.5 h-3.5" /> Password
                 </label>
-                <input 
-                  type="password" 
+                <input
+                  type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full border-2 border-[#ccc] px-2 py-1.5 text-[11px] font-bold outline-none focus:border-[#185baf] text-[#333]"
@@ -103,14 +129,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="submit"
-                disabled={!!isInitializing}
-                className="bg-[#185baf] text-white px-5 py-1.5 text-[11px] font-bold uppercase tracking-widest border border-[#0d3b76] hover:bg-[#124584] shadow-[2px_2px_0_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all min-w-[80px] disabled:opacity-50 disabled:cursor-wait"
+                disabled={busy}
+                className="bg-[#185baf] text-white px-5 py-1.5 text-[11px] font-bold uppercase tracking-widest border border-[#0d3b76] hover:bg-[#124584] shadow-[2px_2px_0_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all min-w-[80px] disabled:opacity-60 disabled:cursor-wait"
               >
-                {isInitializing ? 'Loading...' : 'OK'}
+                {checking ? 'Checking...' : isInitializing ? 'Loading...' : 'OK'}
               </button>
-              <button 
-                type="button" 
-                onClick={() => { setUsername(''); setPassword(''); }} 
+              <button
+                type="button"
+                onClick={() => { setUsername(''); setPassword(''); setError(''); }}
                 className="bg-white text-[#333] px-5 py-1.5 text-[11px] font-bold uppercase tracking-widest border border-[#ccc] hover:bg-[#f2f2f2] shadow-[2px_2px_0_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.8)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all min-w-[80px]"
               >
                 Cancel
@@ -119,7 +145,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
           </form>
         </div>
 
-        {/* Status Bar */}
         <div className="px-3 py-1 bg-[#e0e0e0] border-t border-[#ccc] flex items-center gap-2 text-[#666]">
           <ShieldCheck className="w-3.5 h-3.5 opacity-50" />
           <span className="text-[9px] font-bold uppercase tracking-widest opacity-50">Enterprise Secure Connection Active</span>

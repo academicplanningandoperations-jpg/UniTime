@@ -54,9 +54,13 @@ const App: React.FC = () => {
   };
 
   const [isSyncing, setIsSyncing] = useState(false);
-  // True while loadData is running — Login shows a spinner so users don't
-  // attempt login before Supabase users are loaded (would fail with MOCK_USERS).
+  // True while initial loadData is running. Capped at 5s so a hanging Supabase
+  // connection never permanently disables the login button.
   const [isInitializing, setIsInitializing] = useState(true);
+  useEffect(() => {
+    const cap = setTimeout(() => setIsInitializing(false), 5000);
+    return () => clearTimeout(cap);
+  }, []);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
   const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(() => {
     const isSkipped = localStorage.getItem('unitime_skip_supabase') === 'true';

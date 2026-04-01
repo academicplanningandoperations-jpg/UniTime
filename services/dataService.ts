@@ -59,7 +59,11 @@ export class DataService {
     return { data: all, error: null };
   }
 
-  private static async upsertBatch(tableName: string, rows: any[]): Promise<string | null> {
+  private static async upsertBatch(
+    tableName: string,
+    rows: any[],
+    onProgress?: (pct: number, synced: number, total: number) => void
+  ): Promise<string | null> {
     const BATCH = 20;       // Very small batches for Supabase free-tier
     const MAX_RETRIES = 5;  // More retries for connection issues
     const BATCH_DELAY = 2000; // 2s pause between batches — critical for free-tier
@@ -94,8 +98,11 @@ export class DataService {
       if (!succeeded) {
         failedBatches.push(batchNum);
         console.error(`[DB] ${tableName} batch ${batchNum}/${totalBatches} FAILED after ${MAX_RETRIES} retries — skipping to next batch`);
-        // Continue with remaining batches instead of aborting
       }
+
+      // Report progress
+      const pct = Math.round((batchNum / totalBatches) * 100);
+      if (onProgress) onProgress(pct, successCount, rows.length);
 
       // Pause between batches to let Supabase connection pool recover
       if (i + BATCH < rows.length) {
@@ -206,7 +213,8 @@ export class DataService {
     tableName: string,
     storageKey: string,
     data: T[],
-    termId?: string
+    termId?: string,
+    onProgress?: (pct: number, synced: number, total: number) => void
   ): Promise<void> {
     // Users are never cached locally — Supabase is the only truth for users
     if (tableName !== 'users') {
@@ -229,7 +237,7 @@ export class DataService {
     const sanitized = itemsToSync.map(item => this.sanitize(tableName, item, termId));
 
     if (sanitized.length > 0) {
-      const upsertErr = await this.upsertBatch(tableName, sanitized);
+      const upsertErr = await this.upsertBatch(tableName, sanitized, onProgress);
       // Refresh the timestamp after the (potentially long) upload finishes
       this.lastWriteTimestamp = Date.now();
 

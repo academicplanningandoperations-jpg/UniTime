@@ -414,40 +414,40 @@ const App: React.FC = () => {
     });
   };
 
-  const handleUpdateCourses = async (updatedCourses: Course[]) => {
+  type ProgressFn = (pct: number, synced: number, total: number) => void;
+
+  const handleUpdateCourses = async (updatedCourses: Course[], onProgress?: ProgressFn) => {
     await withSync(async () => {
-      const deletedIds = courses.filter(old => !updatedCourses.some(newIt => newIt.id === old.id)).map(c => c.id);
+      const deletedIds = courses.filter(old => !updatedCourses.some(n => n.id === old.id)).map(c => c.id);
       setCourses(updatedCourses);
-      await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id);
+      await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id, onProgress);
       for (const id of deletedIds) await DataService.deleteRecord('courses', id);
-      // No confirmation read-back — trust local state after successful write.
-      // Background refresh (30s) will eventually reconcile with Supabase.
     });
   };
 
-  const handleUpdateFaculties = async (updatedFaculties: Faculty[]) => {
+  const handleUpdateFaculties = async (updatedFaculties: Faculty[], onProgress?: ProgressFn) => {
     await withSync(async () => {
-      const deletedIds = faculties.filter(old => !updatedFaculties.some(newIt => newIt.id === old.id)).map(c => c.id);
+      const deletedIds = faculties.filter(old => !updatedFaculties.some(n => n.id === old.id)).map(f => f.id);
       setFaculties(updatedFaculties);
-      await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id);
+      await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id, onProgress);
       for (const id of deletedIds) await DataService.deleteRecord('faculties', id);
     });
   };
 
-  const handleUpdateRooms = async (updatedRooms: Room[]) => {
+  const handleUpdateRooms = async (updatedRooms: Room[], onProgress?: ProgressFn) => {
     await withSync(async () => {
-      const deletedIds = rooms.filter(old => !updatedRooms.some(newIt => newIt.id === old.id)).map(c => c.id);
+      const deletedIds = rooms.filter(old => !updatedRooms.some(n => n.id === old.id)).map(r => r.id);
       setRooms(updatedRooms);
-      await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id);
+      await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id, onProgress);
       for (const id of deletedIds) await DataService.deleteRecord('rooms', id);
     });
   };
 
-  const handleUpdateGroups = async (updatedGroups: StudentGroup[]) => {
+  const handleUpdateGroups = async (updatedGroups: StudentGroup[], onProgress?: ProgressFn) => {
     await withSync(async () => {
-      const deletedIds = groups.filter(old => !updatedGroups.some(newIt => newIt.id === old.id)).map(c => c.id);
+      const deletedIds = groups.filter(old => !updatedGroups.some(n => n.id === old.id)).map(g => g.id);
       setGroups(updatedGroups);
-      await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id);
+      await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id, onProgress);
       for (const id of deletedIds) await DataService.deleteRecord('groups', id);
     });
   };

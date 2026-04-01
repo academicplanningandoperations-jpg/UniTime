@@ -3,15 +3,17 @@ import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshC
 import { Course, Faculty, Room, StudentGroup } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
+type ProgressFn = (pct: number, synced: number, total: number) => void;
+
 interface DataImportPanelProps {
   courses: Course[];
   faculties: Faculty[];
   rooms: Room[];
   groups: StudentGroup[];
-  onUploadCourses: (data: Course[]) => void;
-  onUploadFaculties: (data: Faculty[]) => void;
-  onUploadRooms: (data: Room[]) => void;
-  onUploadGroups: (data: StudentGroup[]) => void;
+  onUploadCourses: (data: Course[], onProgress: ProgressFn) => void;
+  onUploadFaculties: (data: Faculty[], onProgress: ProgressFn) => void;
+  onUploadRooms: (data: Room[], onProgress: ProgressFn) => void;
+  onUploadGroups: (data: StudentGroup[], onProgress: ProgressFn) => void;
   onWipeData: (tab: 'Modules' | 'Faculties' | 'Rooms' | 'Groups') => Promise<void>;
   activeTermId?: string;
   activeTermName?: string;
@@ -29,6 +31,13 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeImportType, setActiveImportType] = useState<ImportType | null>(null);
   const [newItem, setNewItem] = useState<any>({});
+  const [uploadProgress, setUploadProgress] = useState<{
+    active: boolean;
+    type: string;
+    pct: number;
+    synced: number;
+    total: number;
+  } | null>(null);
 
   const templates = {
     Modules: "_module_id,_unique_name,_name,_academic_year,Semester\n1,CHCE2028_2,Chemical Technology,2025,SEM-3\n2,CS101,Intro to CS,2025,SEM-1",
@@ -150,21 +159,37 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         return merged;
       };
 
-      if (activeImportType === 'Modules') {
-        onUploadCourses(mergeData(courses, mappedData as any[]));
-      }
-      if (activeImportType === 'Faculties') {
-        onUploadFaculties(mergeData(faculties, mappedData as any[]));
-      }
-      if (activeImportType === 'Rooms') {
-        onUploadRooms(mergeData(rooms, mappedData as any[]));
-      }
-      if (activeImportType === 'Groups') {
-        onUploadGroups(mergeData(groups, mappedData as any[]));
-      }
+      const importType = activeImportType;
+      const totalCount = mappedData.length;
 
-      setLastUpload({ type: activeImportType, count: mappedData.length });
-      setTimeout(() => setLastUpload(null), 5000);
+      setUploadProgress({ active: true, type: importType, pct: 0, synced: 0, total: totalCount });
+
+      const onProgress: ProgressFn = (pct, synced, total) => {
+        setUploadProgress({ active: true, type: importType, pct, synced, total });
+      };
+
+      const onDone = () => {
+        setUploadProgress(null);
+        setLastUpload({ type: importType, count: totalCount });
+        setTimeout(() => setLastUpload(null), 5000);
+      };
+
+      if (importType === 'Modules') {
+        onUploadCourses(mergeData(courses, mappedData as any[]), onProgress);
+        setTimeout(onDone, 500);
+      }
+      if (importType === 'Faculties') {
+        onUploadFaculties(mergeData(faculties, mappedData as any[]), onProgress);
+        setTimeout(onDone, 500);
+      }
+      if (importType === 'Rooms') {
+        onUploadRooms(mergeData(rooms, mappedData as any[]), onProgress);
+        setTimeout(onDone, 500);
+      }
+      if (importType === 'Groups') {
+        onUploadGroups(mergeData(groups, mappedData as any[]), onProgress);
+        setTimeout(onDone, 500);
+      }
     };
     reader.readAsText(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -389,6 +414,41 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
 
   return (
     <div className="space-y-6 p-2 w-full">
+
+      {/* ── Upload Progress Bar ── */}
+      <AnimatePresence>
+        {uploadProgress && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] w-full max-w-lg px-4"
+          >
+            <div className="bg-white border-2 border-[#185baf] shadow-2xl p-4 rounded">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-black uppercase tracking-widest text-[#185baf]">
+                  Uploading {uploadProgress.type} to Supabase...
+                </span>
+                <span className="text-[11px] font-black text-[#185baf]">{uploadProgress.pct}%</span>
+              </div>
+              <div className="w-full bg-[#e0e0e0] h-3 rounded overflow-hidden">
+                <motion.div
+                  className="h-3 bg-[#185baf] rounded"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${uploadProgress.pct}%` }}
+                  transition={{ duration: 0.3 }}
+                />
+              </div>
+              <div className="flex justify-between mt-1.5">
+                <span className="text-[10px] text-[#666] font-bold">
+                  {uploadProgress.synced} / {uploadProgress.total} rows synced
+                </span>
+                <span className="text-[10px] text-[#999] font-bold">
+                  Please wait — do not close this tab
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b-2 border-[#185baf] pb-2">
         <div>
           <h2 className="text-xl font-bold text-[#333] tracking-tight">Resource Management</h2>

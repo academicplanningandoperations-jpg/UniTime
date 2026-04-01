@@ -440,16 +440,20 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     const isCovered = filteredEntries.some(e => e.day === day && time > e.startTime && time < e.endTime);
 
                     return (
-                      <td 
-                        key={time} 
-                        onClick={() => !isCovered && onCellClick?.(day as DayOfWeek, time, viewType, viewId)} 
+                      <td
+                        key={time}
+                        onClick={() => !isCovered && cellEntries.length === 0 && onCellClick?.(day as DayOfWeek, time, viewType, viewId)}
                         onContextMenu={(e) => !isCovered && handleCellContextMenu(e, day as DayOfWeek, time)}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, day as DayOfWeek, time)}
                         className={`relative border-r border-b border-[#eee] transition-colors ${isMaximized ? 'h-32' : 'h-14'} ${isCovered ? 'bg-[#f5f5f5]' : 'hover:bg-[#e0ebf9] cursor-pointer group/cell'} ${time.endsWith(':30') ? 'border-r-[#e0e0e0]' : 'border-r-[#f0f0f0]'}`}
                       >
+                        {/* "+" button — always visible on hover for non-covered cells (including cells with existing entries for intentional clashes) */}
                         {!isCovered && (
-                          <div className="absolute top-1 right-1 z-50 opacity-0 group-hover/cell:opacity-100 transition-opacity">
+                          <div
+                            className="absolute top-0.5 right-0.5 z-50 opacity-0 group-hover/cell:opacity-100 transition-opacity"
+                            onClick={(e) => { e.stopPropagation(); onCellClick?.(day as DayOfWeek, time, viewType, viewId); }}
+                          >
                             <Plus className="w-3.5 h-3.5 text-[#185baf] bg-white rounded-full shadow-md border border-[#185baf] p-0.5" />
                           </div>
                         )}

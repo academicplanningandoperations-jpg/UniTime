@@ -69,7 +69,15 @@ const SessionModal: React.FC<SessionModalProps> = ({
   }, [formData.startTime, formData.courseId, courses, initialData?.endTime]);
 
   useEffect(() => {
-    if (initialData) setFormData(prev => ({ ...prev, ...initialData }));
+    if (initialData) setFormData({
+      day: 'Monday',
+      startTime: '09:00',
+      endTime: '10:00',
+      weeks: Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1),
+      category: 'Theory',
+      groupIds: [],
+      ...initialData
+    });
   }, [initialData]);
 
   const dragControls = useDragControls();

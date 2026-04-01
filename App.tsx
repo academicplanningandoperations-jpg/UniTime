@@ -333,7 +333,7 @@ const App: React.FC = () => {
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
       id: `s-${Date.now()}-${index}`,
-      termId: ne.termId || effectiveActiveTerm?.id || '',
+      termId: effectiveActiveTerm?.id || ne.termId || '',
       departmentId: currentUser?.departmentScope === 'All' ? 'CS' : (currentUser?.departmentScope || 'General')
     }));
     await withSync(async () => {

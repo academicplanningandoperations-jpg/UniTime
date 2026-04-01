@@ -60,12 +60,36 @@ export class DataService {
   }
 
   private static async upsertBatch(tableName: string, rows: any[]): Promise<string | null> {
-    const BATCH = 300; // Lowered batch size safely
+    const BATCH = 50;  // Small batches to stay within Supabase free-tier limits
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1500; // ms between retries
+    const BATCH_DELAY = 300;  // ms pause between successful batches
+
     for (let i = 0; i < rows.length; i += BATCH) {
-      const { error } = await supabase!.from(tableName).upsert(rows.slice(i, i + BATCH));
-      if (error) {
-        console.error(`[DB] Bulk Upsert Error in ${tableName}:`, error);
-        return error.message;
+      const chunk = rows.slice(i, i + BATCH);
+      let lastError: string | null = null;
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        const { error } = await supabase!.from(tableName).upsert(chunk);
+        if (!error) {
+          lastError = null;
+          break;
+        }
+        lastError = error.message;
+        console.warn(`[DB] Upsert ${tableName} batch ${Math.floor(i/BATCH)+1} attempt ${attempt}/${MAX_RETRIES} failed:`, error.message);
+        if (attempt < MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY * attempt));
+        }
+      }
+
+      if (lastError) {
+        console.error(`[DB] Upsert ${tableName} failed after ${MAX_RETRIES} retries:`, lastError);
+        return lastError;
+      }
+
+      // Small pause between batches to avoid overwhelming Supabase
+      if (i + BATCH < rows.length) {
+        await new Promise(r => setTimeout(r, BATCH_DELAY));
       }
     }
     return null;

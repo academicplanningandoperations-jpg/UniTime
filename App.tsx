@@ -64,16 +64,9 @@ const App: React.FC = () => {
 
   // Initialise users from localStorage so we don't fall back to MOCK_USERS
   // when Supabase is temporarily unavailable — avoids username constraint conflicts.
-  const [users, setUsers] = useState<UserAccount[]>(() => {
-    try {
-      const saved = localStorage.getItem('unitime_users');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return MOCK_USERS;
-  });
+  // Users are NOT cached in localStorage — Supabase is the single source of truth.
+  // Caching caused ghost users to appear after Supabase deletes, breaking login.
+  const [users, setUsers] = useState<UserAccount[]>(MOCK_USERS);
   // Initialise terms from localStorage so effectiveActiveTerm is the REAL term at mount,
   // not the mock one — prevents loading term-scoped data with the wrong termId.
   const [terms, setTerms] = useState<Term[]>(() => {
@@ -125,6 +118,9 @@ const App: React.FC = () => {
     : terms.find(t => t.isActive);
 
   useEffect(() => {
+    // Always clear stale user cache on startup — Supabase is the single source of truth for users.
+    localStorage.removeItem('unitime_users');
+
     const loadData = async () => {
       setIsSyncing(true);
       try {

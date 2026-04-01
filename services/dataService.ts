@@ -330,6 +330,26 @@ export class DataService {
         });
         if (!error && data) {
           console.log(`[DataService] Loaded ${data.length} items for ${tableName} from Supabase.`);
+
+          // Auto-migrate: if 0 results for this term but rows exist under a different termId,
+          // re-tag them all to the current termId so data is never invisible after term changes.
+          if (data.length === 0 && termId && tableName !== 'users' && tableName !== 'terms') {
+            const { data: allRows } = await this.fetchAllPages<any>((from, to) =>
+              supabase!.from(tableName).select('*').range(from, to)
+            );
+            if (allRows && allRows.length > 0) {
+              console.log(`[DataService] Auto-migrating ${allRows.length} ${tableName} rows to term ${termId}`);
+              const sanitized = allRows.map((r: any) => this.sanitizeItem(tableName, r, termId));
+              const BATCH = 500;
+              for (let i = 0; i < sanitized.length; i += BATCH) {
+                await supabase!.from(tableName).upsert(sanitized.slice(i, i + BATCH), { onConflict: 'id' });
+              }
+              const migrated = allRows.map((r: any) => ({ ...r, termId }));
+              try { localStorage.setItem(storageKey, JSON.stringify(migrated)); } catch {}
+              return migrated as T[];
+            }
+          }
+
           return data as T[];
         }
 
@@ -372,8 +392,14 @@ export class DataService {
     data: T[],
     termId?: string
   ): Promise<void> {
-    // Always save full array to localStorage
-    localStorage.setItem(storageKey, JSON.stringify(data));
+    // Save to localStorage for all tables EXCEPT users.
+    // Users must never be cached locally — Supabase is the single source of truth.
+    // Caching caused deleted users to reappear as ghosts on the login screen.
+    if (tableName !== 'users') {
+      localStorage.setItem(storageKey, JSON.stringify(data));
+    } else {
+      localStorage.removeItem(storageKey); // always clear any stale user cache
+    }
 
     if (!supabase) return;
 

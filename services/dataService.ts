@@ -64,9 +64,9 @@ export class DataService {
     rows: any[],
     onProgress?: (pct: number, synced: number, total: number) => void
   ): Promise<string | null> {
-    const BATCH = 20;       // Very small batches for Supabase free-tier
-    const MAX_RETRIES = 5;  // More retries for connection issues
-    const BATCH_DELAY = 2000; // 2s pause between batches — critical for free-tier
+    const BATCH = 2000;     // MASSIVE batch to perform the upload in 1-2 rapid requests
+    const MAX_RETRIES = 5;  // Retry on connection instability
+    const BATCH_DELAY = 1000; // 1 second delay between massive batches
 
     const totalBatches = Math.ceil(rows.length / BATCH);
     let successCount = 0;

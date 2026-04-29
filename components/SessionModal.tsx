@@ -172,7 +172,10 @@ const SessionModal: React.FC<SessionModalProps> = ({
         if (formData.groupIds && formData.groupIds.some(g => entry.groupIds.includes(g))) {
           const sharedGroups = groups.filter(g => formData.groupIds!.includes(g.id) && entry.groupIds.includes(g.id));
           sharedGroups.forEach(g => {
-             if (!conflicts.includes(`Cohort ${g.name} has a conflict`)) conflicts.push(`Cohort ${g.name} has a conflict`);
+            const cohortName = (g as any)._unique_name || g.name;
+            if (!conflicts.includes(`Cohort "${cohortName}" has a scheduling conflict`)) {
+              conflicts.push(`Cohort "${cohortName}" has a scheduling conflict`);
+            }
           });
         }
       }
@@ -424,13 +427,14 @@ const SessionModal: React.FC<SessionModalProps> = ({
                 required
               />
 
-              <MultiSearchableDropdown 
-                label={<span>Cohorts / Student Groups <span className="text-red-500">*</span></span>}
+              <MultiSearchableDropdown
+                label={<span>Cohorts <span className="text-red-500">*</span></span>}
                 icon={<Users className="w-3.5 h-3.5" />}
-                options={groups.map(g => ({ id: g.id, name: g.name, sub: `${g.program} · Sem ${g.semester}` }))}
+                options={groups.map(g => ({ id: g.id, name: (g as any)._unique_name || g.name, sub: `${g.program} · Sem ${g.semester}` }))}
                 values={formData.groupIds || []}
                 onChange={ids => setFormData({ ...formData, groupIds: ids })}
-                placeholder="Select Groups"
+                placeholder="Select Cohorts"
+                allowSelectAll={true}
                 required
               />
             </div>

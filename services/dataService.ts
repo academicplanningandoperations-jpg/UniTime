@@ -1,4 +1,4 @@
-import { ScheduleEntry, Faculty, Clash } from '../types';
+import { ScheduleEntry, Faculty, Room, StudentGroup, Clash } from '../types';
 import { supabase } from './supabase';
 
 // ─── Schema whitelist ─────────────────────────────────────────────────────────
@@ -10,7 +10,7 @@ const SCHEMA: Record<string, string[]> = {
   faculties: ['id', 'facultyId', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],
   rooms:     ['id', 'termId', 'name', 'capacity', 'type'],
   groups:    ['id', 'termId', 'name', 'program', 'semester', 'studentCount'],
-  schedule:  ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category'],
+  schedule:  ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt'],
 };
 
 // Term-scoped tables — all reads/writes are filtered by termId
@@ -399,12 +399,23 @@ export class DataService {
     } catch { return 0; }
   }
 
-  static detectConflicts(schedule: ScheduleEntry[], facultyList: Faculty[] = []): Clash[] {
+  static detectConflicts(
+    schedule: ScheduleEntry[],
+    facultyList: Faculty[] = [],
+    roomList: Room[] = [],
+    groupList: StudentGroup[] = []
+  ): Clash[] {
     const clashes: Clash[] = [];
     const roomMap = new Map<string, string>();
     const facultyMap = new Map<string, string>();
-    const groupMap = new Map<string, string>();
+    const cohortMap = new Map<string, string>();
     const loadTracker = new Map<string, number>();
+
+    const getName = (list: any[], id: string, fallback: string) =>
+      list.find((x: any) => x.id === id)?._Faculty_name ||
+      list.find((x: any) => x.id === id)?._unique_name ||
+      list.find((x: any) => x.id === id)?.name ||
+      fallback;
 
     for (const entry of schedule) {
       const weeks = Array.isArray(entry.weeks) ? entry.weeks : [];
@@ -415,19 +426,23 @@ export class DataService {
 
         const rk = `${base}-room-${entry.roomId}`;
         if (entry.roomId && roomMap.has(rk)) {
-          clashes.push({ type: 'Room', message: `Room conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, roomMap.get(rk)!] });
+          const roomName = getName(roomList, entry.roomId, `Room #${entry.roomId.slice(-6)}`);
+          clashes.push({ type: 'Room', message: `Room "${roomName}" is double-booked on ${entry.day} at ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, roomMap.get(rk)!] });
         } else if (entry.roomId) roomMap.set(rk, entry.id);
 
         const fk = `${base}-faculty-${entry.facultyId}`;
         if (facultyMap.has(fk)) {
-          clashes.push({ type: 'Faculty', message: `Faculty conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, facultyMap.get(fk)!] });
+          const facultyName = getName(facultyList, entry.facultyId, `Faculty #${entry.facultyId.slice(-6)}`);
+          clashes.push({ type: 'Faculty', message: `Faculty "${facultyName}" has overlapping sessions on ${entry.day} at ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, facultyMap.get(fk)!] });
         } else facultyMap.set(fk, entry.id);
 
         for (const gId of (entry.groupIds || [])) {
-          const gk = `${base}-group-${gId}`;
-          if (groupMap.has(gk)) {
-            clashes.push({ type: 'Group', message: `Group conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, groupMap.get(gk)!] });
-          } else groupMap.set(gk, entry.id);
+          const gk = `${base}-cohort-${gId}`;
+          if (cohortMap.has(gk)) {
+            const cohortName = getName(groupList, gId, `Cohort #${gId.slice(-6)}`);
+            const otherEntryId = cohortMap.get(gk)!;
+            clashes.push({ type: 'Cohort', message: `Cohort "${cohortName}" is scheduled in two sessions simultaneously on ${entry.day} at ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, otherEntryId] });
+          } else cohortMap.set(gk, entry.id);
         }
 
         loadTracker.set(`${week}-${entry.facultyId}`, (loadTracker.get(`${week}-${entry.facultyId}`) || 0) + duration);
@@ -441,7 +456,7 @@ export class DataService {
         if (faculty && hours > faculty.maxHoursPerWeek) {
           clashes.push({
             type: 'LoadViolation',
-            message: `${faculty.name} over capacity in Week ${week} (${hours.toFixed(1)}h / ${faculty.maxHoursPerWeek}h)`,
+            message: `Faculty "${faculty.name}" over capacity in Week ${week} (${hours.toFixed(1)}h / ${faculty.maxHoursPerWeek}h)`,
             affectedIds: schedule.filter(s => s.facultyId === fId && (s.weeks || []).includes(Number(week))).map(s => s.id),
           });
         }

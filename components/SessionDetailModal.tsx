@@ -215,9 +215,10 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
                   <MultiSearchableDropdown
                     label="COHORTS"
                     icon={<Users className="w-3.5 h-3.5" />}
-                    options={groups.map(g => ({ id: g.id, name: g.name }))}
+                    options={groups.map(g => ({ id: g.id, name: (g as any)._unique_name || g.name }))}
                     values={editData.groupIds}
                     onChange={ids => setEditData({ ...editData, groupIds: ids })}
+                    allowSelectAll={true}
                   />
                 </div>
               </div>
@@ -252,7 +253,7 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
                           <div className="flex flex-wrap gap-1">
                             {selectedGroups.map(g => (
                               <span key={g.id} className="border border-[#ccc] bg-[#f8f9fa] px-1.5 py-0.5 text-[10px]">
-                                {g.name}
+                                {(g as any)._unique_name || g.name}
                               </span>
                             ))}
                           </div>
@@ -261,6 +262,25 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
                         )}
                       </td>
                     </tr>
+                    {(activeEntry.createdBy || activeEntry.updatedBy) && (
+                      <tr className="border-t border-[#eee]">
+                        <td colSpan={2} className="pt-2">
+                          <div className="text-[9px] font-bold text-[#999] uppercase tracking-widest mb-1">Change Log</div>
+                          {activeEntry.createdBy && (
+                            <div className="text-[10px] text-[#555]">
+                              <span className="font-bold">Created by:</span> {activeEntry.createdBy}
+                              {activeEntry.createdAt && <span className="text-[#999] ml-1">· {new Date(activeEntry.createdAt).toLocaleString()}</span>}
+                            </div>
+                          )}
+                          {activeEntry.updatedBy && (
+                            <div className="text-[10px] text-[#555] mt-0.5">
+                              <span className="font-bold">Last edited by:</span> {activeEntry.updatedBy}
+                              {activeEntry.updatedAt && <span className="text-[#999] ml-1">· {new Date(activeEntry.updatedAt).toLocaleString()}</span>}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
 import { FileText, Download, Table, AlertTriangle, Calendar, Users, Briefcase, List, Trash2, Search, ChevronUp, ChevronDown } from 'lucide-react';
 import { ScheduleEntry, Course, Faculty, Room, StudentGroup, Term, Clash, UserAccount, Role } from '../types';
 import { DataService } from '../services/dataService';
@@ -51,17 +52,15 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
     return sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />;
   };
 
-  
   const downloadCSV = (data: any[], filename: string) => {
     if (data.length === 0) {
       alert("No data available for this report.");
       return;
     }
-    
     const headers = Object.keys(data[0]);
     const csvRows = [
       headers.join(','),
-      ...data.map(row => 
+      ...data.map(row =>
         headers.map(fieldName => {
           const value = row[fieldName] || '';
           const escaped = ('' + value).replace(/"/g, '""');
@@ -69,7 +68,6 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
         }).join(',')
       )
     ];
-
     const csvContent = csvRows.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -83,7 +81,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
   };
 
   const getFilteredSchedule = () => {
-    return activeTermId 
+    return activeTermId
       ? schedule.filter(s => s.termId === activeTermId)
       : schedule;
   };
@@ -95,13 +93,12 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       const course = courses.find(c => c.id === s.courseId);
       const faculty = faculties.find(f => f.id === s.facultyId);
       const room = rooms.find(r => r.id === s.roomId);
-      
       const sessionGroups = groups.filter(g => s.groupIds?.includes(g.id));
-      
+
       if (sessionGroups.length === 0) {
         rows.push({
           '_event_id': eventId,
-          '_day_of_week': s.day.substring(0, 3), 
+          '_day_of_week': s.day.substring(0, 3),
           '_start_time': s.startTime,
           '_end_time': s.endTime,
           '_weeks': 'Jan-25',
@@ -109,15 +106,15 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
           'Module Unique ID': (course as any)?._unique_name || course?.code || '',
           'Module': (course as any)?._name || course?.name || '',
           'Room': (room as any)?._unique_name || room?.name || '',
-          'Staff_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
-          'Staff_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
-          'Group': ''
+          'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
+          'Faculty_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
+          'Cohort': ''
         });
       } else {
         sessionGroups.forEach(g => {
           rows.push({
             '_event_id': eventId,
-            '_day_of_week': s.day.substring(0, 3), 
+            '_day_of_week': s.day.substring(0, 3),
             '_start_time': s.startTime,
             '_end_time': s.endTime,
             '_weeks': 'Jan-25',
@@ -125,14 +122,90 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
             'Module Unique ID': (course as any)?._unique_name || course?.code || '',
             'Module': (course as any)?._name || course?.name || '',
             'Room': (room as any)?._unique_name || room?.name || '',
-            'Staff_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
-            'Staff_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
-            'Group': (g as any)._unique_name || g.name
+            'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
+            'Faculty_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
+            'Cohort': (g as any)._unique_name || g.name
           });
         });
       }
     });
     return rows;
+  };
+
+  // Build detail for each affected schedule entry in a clash
+  const getEntryDetail = (entryId: string) => {
+    const s = schedule.find(e => e.id === entryId);
+    if (!s) return null;
+    const course = courses.find(c => c.id === s.courseId);
+    const faculty = faculties.find(f => f.id === s.facultyId);
+    const room = rooms.find(r => r.id === s.roomId);
+    const cohortNames = groups.filter(g => s.groupIds?.includes(g.id)).map(g => (g as any)._unique_name || g.name).join(', ');
+    return {
+      day: s.day,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      module: (course as any)?._name || course?.name || '',
+      faculty: (faculty as any)?._Faculty_name || faculty?.name || '',
+      room: (room as any)?._unique_name || room?.name || '',
+      cohorts: cohortNames,
+      category: s.category || '',
+    };
+  };
+
+  const downloadClashExcel = () => {
+    const cohortClashes = clashes.filter(c => c.type === 'Cohort');
+    const facultyClashes = clashes.filter(c => c.type === 'Faculty');
+    const roomClashes = clashes.filter(c => c.type === 'Room');
+
+    const buildSheet = (clashList: Clash[], extraColLabel: string) => {
+      return clashList.map((clash, idx) => {
+        const [id1, id2] = clash.affectedIds;
+        const e1 = getEntryDetail(id1);
+        const e2 = getEntryDetail(id2);
+        return {
+          '#': idx + 1,
+          'Clash Description': clash.message,
+          'Session 1 — Day': e1?.day || '',
+          'Session 1 — Time': e1 ? `${e1.startTime}–${e1.endTime}` : '',
+          'Session 1 — Module': e1?.module || '',
+          'Session 1 — Faculty': e1?.faculty || '',
+          'Session 1 — Room': e1?.room || '',
+          'Session 1 — Cohorts': e1?.cohorts || '',
+          'Session 2 — Day': e2?.day || '',
+          'Session 2 — Time': e2 ? `${e2.startTime}–${e2.endTime}` : '',
+          'Session 2 — Module': e2?.module || '',
+          'Session 2 — Faculty': e2?.faculty || '',
+          'Session 2 — Room': e2?.room || '',
+          'Session 2 — Cohorts': e2?.cohorts || '',
+        };
+      });
+    };
+
+    const loadViolations = clashes.filter(c => c.type === 'LoadViolation').map((c, idx) => ({
+      '#': idx + 1,
+      'Description': c.message,
+    }));
+
+    const wb = XLSX.utils.book_new();
+
+    const cohortData = buildSheet(cohortClashes, 'Cohort');
+    const facultyData = buildSheet(facultyClashes, 'Faculty');
+    const roomData = buildSheet(roomClashes, 'Room');
+
+    const appendSheet = (data: any[], sheetName: string, emptyMsg: string) => {
+      const ws = XLSX.utils.json_to_sheet(
+        data.length > 0 ? data : [{ Note: emptyMsg }]
+      );
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    };
+
+    appendSheet(cohortData, 'Cohort Clashes', 'No cohort clashes detected.');
+    appendSheet(facultyData, 'Faculty Clashes', 'No faculty clashes detected.');
+    appendSheet(roomData, 'Room Clashes', 'No room clashes detected.');
+    appendSheet(loadViolations, 'Load Violations', 'No load violations detected.');
+
+    const filename = `Clash_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, filename);
   };
 
   const reportCards = [
@@ -146,16 +219,10 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
     {
       id: 'clashes',
       title: 'Conflict & Clash Report',
-      description: 'Audit log of all current room, faculty, and group overlaps that require attention.',
+      description: 'Multi-sheet Excel report with separate tabs for Cohort, Faculty, and Room clashes.',
       icon: <AlertTriangle className="w-5 h-5" />,
-      action: () => {
-        const data = clashes.map(c => ({
-          'Type': c.type,
-          'Message': c.message,
-          'Status': 'Unresolved'
-        }));
-        downloadCSV(data, 'Institutional_Clash_Report');
-      }
+      action: downloadClashExcel,
+      buttonLabel: 'Download Excel Report'
     },
     {
       id: 'resources',
@@ -167,12 +234,11 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
           const room = rooms.find(r => r.id === s.roomId);
           const selectedGroups = groups.filter(g => s.groupIds?.includes(g.id));
           const totalStudents = selectedGroups.reduce((sum, g) => sum + (g.studentCount || 0), 0);
-          const groupNames = selectedGroups.map(g => g.name).join(', ');
-          
+          const cohortNames = selectedGroups.map(g => g.name).join(', ');
           return {
             'Room': room?.name,
             'Capacity': room?.capacity,
-            'Groups': groupNames,
+            'Cohorts': cohortNames,
             'Total Students': totalStudents,
             'Utilization %': room ? Math.round(totalStudents / room.capacity * 100) : 0
           };
@@ -190,14 +256,13 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
         const data = faculties.map(f => {
           const facultySessions = filteredSchedule.filter(s => s.facultyId === f.id);
           const totalWeeklyMinutes = facultySessions.reduce((acc, s) => {
-             return acc + (DataService.getDuration(s.startTime, s.endTime) * 60);
+            return acc + (DataService.getDuration(s.startTime, s.endTime) * 60);
           }, 0);
-          
           return {
             '_Faculty_ID': (f as any)?._Faculty_ID || f.id,
             '_Faculty_name': (f as any)?._Faculty_name || f.name,
             '_deptName': (f as any)?._deptName || f.department,
-            'Faculty Load': Math.round(totalWeeklyMinutes / 60)
+            'Faculty Load (hrs)': Math.round(totalWeeklyMinutes / 60)
           };
         });
         downloadCSV(data, 'Faculty_Load_Report');
@@ -205,7 +270,6 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
     }
   ];
 
-  // Build schedule entries for the table view
   const activeSchedule = activeTermId ? schedule.filter(s => s.termId === activeTermId) : schedule;
 
   const enrichedEntries = activeSchedule.map(s => {
@@ -290,7 +354,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
               : 'border-transparent text-[#666] hover:text-[#185baf] hover:bg-[#f5f5f5]'
           }`}
         >
-          <FileText className="w-3.5 h-3.5" /> CSV Reports
+          <FileText className="w-3.5 h-3.5" /> Reports
         </button>
         <button
           onClick={() => setActiveReportTab('entries')}
@@ -308,9 +372,26 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
         </button>
       </div>
 
-      {/* ── CSV REPORTS TAB ── */}
+      {/* ── REPORTS TAB ── */}
       {activeReportTab === 'reports' && (
         <>
+          {/* Clash summary bar */}
+          {clashes.length > 0 && (
+            <div className="mx-2 flex flex-wrap gap-2">
+              {(['Cohort', 'Faculty', 'Room', 'LoadViolation'] as const).map(type => {
+                const count = clashes.filter(c => c.type === type).length;
+                if (count === 0) return null;
+                const label = type === 'LoadViolation' ? 'Load Violations' : `${type} Clashes`;
+                return (
+                  <div key={type} className="flex items-center gap-1.5 px-2 py-1 bg-[#fdedec] border border-[#f5c6cb] text-[#a94442] text-[10px] font-bold uppercase">
+                    <AlertTriangle className="w-3 h-3" />
+                    {count} {label}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <div className="px-2 grid grid-cols-1 md:grid-cols-2 gap-4">
             {reportCards.map((report) => (
               <div
@@ -335,7 +416,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                     className="w-full py-1.5 btn-primary text-sm flex items-center justify-center gap-2 shadow-sm"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    Download CSV Report
+                    {(report as any).buttonLabel || 'Download CSV Report'}
                   </button>
                 </div>
               </div>
@@ -364,13 +445,12 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       {/* ── SCHEDULE ENTRIES TAB ── */}
       {activeReportTab === 'entries' && (
         <div className="mx-2 space-y-3">
-          {/* Toolbar */}
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2 bg-white border border-[#ccc] px-2 py-1.5 min-w-[260px]">
               <Search className="w-3.5 h-3.5 text-[#999]" />
               <input
                 type="text"
-                placeholder="Search by course, faculty, room, group, day..."
+                placeholder="Search by module, faculty, room, cohort, day..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="text-xs outline-none w-full text-[#333] placeholder:text-[#aaa]"
@@ -391,7 +471,6 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
             </div>
           </div>
 
-          {/* Table */}
           {sortedEntries.length === 0 ? (
             <div className="py-16 bg-[#f9f9f9] border border-[#ccc] flex flex-col items-center justify-center text-center">
               <List className="w-8 h-8 text-[#ccc] mb-3" />
@@ -412,11 +491,13 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                         <ThBtn field="course" label="Module" />
                         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Module ID</th>
                         <ThBtn field="faculty" label="Faculty" />
-                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Staff ID</th>
+                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Faculty ID</th>
                         <ThBtn field="room" label="Room" />
-                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Groups</th>
+                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Cohorts</th>
                         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Weeks</th>
                         <ThBtn field="category" label="Type" />
+                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Created By</th>
+                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Last Edited By</th>
                         {isAdmin && onDeleteEntry && (
                           <th className="px-3 py-2 text-[11px] font-bold text-[#ac2925] uppercase tracking-wide text-right">Delete</th>
                         )}
@@ -477,6 +558,26 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                             }`}>
                               {entry.category || 'Theory'}
                             </span>
+                          </td>
+                          <td className="px-3 py-2 text-[10px] text-[#555] whitespace-nowrap">
+                            {entry.createdBy ? (
+                              <div>
+                                <div className="font-bold">{entry.createdBy}</div>
+                                {entry.createdAt && (
+                                  <div className="text-[#999]">{new Date(entry.createdAt).toLocaleDateString()}</div>
+                                )}
+                              </div>
+                            ) : <span className="text-[#ccc]">—</span>}
+                          </td>
+                          <td className="px-3 py-2 text-[10px] text-[#555] whitespace-nowrap">
+                            {entry.updatedBy ? (
+                              <div>
+                                <div className="font-bold">{entry.updatedBy}</div>
+                                {entry.updatedAt && (
+                                  <div className="text-[#999]">{new Date(entry.updatedAt).toLocaleDateString()}</div>
+                                )}
+                              </div>
+                            ) : <span className="text-[#ccc]">—</span>}
                           </td>
                           {isAdmin && onDeleteEntry && (
                             <td className="px-3 py-2 text-right">

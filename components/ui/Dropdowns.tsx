@@ -135,10 +135,11 @@ interface MultiSearchableDropdownProps {
   icon: React.ReactNode;
   placeholder?: string;
   required?: boolean;
+  allowSelectAll?: boolean;
 }
 
-export const MultiSearchableDropdown: React.FC<MultiSearchableDropdownProps> = ({ 
-  label, options, values, onChange, icon, placeholder = "Select multiple...", required 
+export const MultiSearchableDropdown: React.FC<MultiSearchableDropdownProps> = ({
+  label, options, values, onChange, icon, placeholder = "Select multiple...", required, allowSelectAll = false
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -211,7 +212,7 @@ export const MultiSearchableDropdown: React.FC<MultiSearchableDropdownProps> = (
               transition={{ duration: 0.15 }}
               className="absolute z-50 w-full mt-1 bg-white border border-[#ccc] shadow-lg overflow-hidden"
             >
-              <div className="p-1.5 border-b border-[#eee] bg-[#f8f9fa]">
+              <div className="p-1.5 border-b border-[#eee] bg-[#f8f9fa] space-y-1">
                 <div className="relative">
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#999]" />
                   <input
@@ -223,6 +224,24 @@ export const MultiSearchableDropdown: React.FC<MultiSearchableDropdownProps> = (
                     className="w-full bg-white border border-[#ccc] pl-7 pr-2 py-1 text-[11px] font-bold text-[#333] outline-none focus:border-[#185baf] placeholder:text-[#999]"
                   />
                 </div>
+                {allowSelectAll && (
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onChange(filteredOptions.map(o => o.id)); }}
+                      className="flex-1 py-0.5 text-[10px] font-bold bg-[#185baf] text-white border border-[#0d3b76] hover:bg-[#124584] transition-colors"
+                    >
+                      Select All ({filteredOptions.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onChange([]); }}
+                      className="flex-1 py-0.5 text-[10px] font-bold bg-white text-[#666] border border-[#ccc] hover:bg-[#e6e6e6] transition-colors"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="max-h-60 overflow-y-auto p-1 custom-scrollbar bg-white">
                 {filteredOptions.length > 0 ? (

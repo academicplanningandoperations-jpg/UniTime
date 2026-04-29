@@ -75,17 +75,21 @@ export interface ScheduleEntry {
   courseId: string;
   facultyId: string;
   roomId: string;
-  groupIds: string[]; // Changed from groupId: string
+  groupIds: string[];
   day: DayOfWeek;
-  startTime: string; 
-  endTime: string;   
+  startTime: string;
+  endTime: string;
   departmentId: string;
   weeks: number[];
   category?: string;
+  createdBy?: string;
+  createdAt?: string;
+  updatedBy?: string;
+  updatedAt?: string;
 }
 
 export interface Clash {
-  type: 'Room' | 'Faculty' | 'Group' | 'Overlap' | 'LoadViolation'; // Added LoadViolation
+  type: 'Room' | 'Faculty' | 'Cohort' | 'Overlap' | 'LoadViolation';
   message: string;
   affectedIds: string[];
 }

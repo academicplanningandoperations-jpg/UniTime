@@ -18,7 +18,7 @@ const ClashIndicator: React.FC<ClashIndicatorProps> = ({ clashes }) => {
     switch (type) {
       case 'Room': return <DoorOpen className="w-4 h-4" />;
       case 'Faculty': return <ShieldAlert className="w-4 h-4" />;
-      case 'Group': return <Users className="w-4 h-4" />;
+      case 'Cohort': return <Users className="w-4 h-4" />;
       case 'LoadViolation': return <Zap className="w-4 h-4" />;
       default: return <AlertCircle className="w-4 h-4" />;
     }

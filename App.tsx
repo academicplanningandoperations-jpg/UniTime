@@ -314,12 +314,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (schedule.length > 0) {
-      const newClashes = DataService.detectConflicts(schedule, faculties);
+      const newClashes = DataService.detectConflicts(schedule, faculties, rooms, groups);
       setClashes(newClashes);
     } else {
       setClashes([]);
     }
-  }, [schedule, faculties]);
+  }, [schedule, faculties, rooms, groups]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalInitialData, setModalInitialData] = useState<Partial<ScheduleEntry>>({});
@@ -330,11 +330,16 @@ const App: React.FC = () => {
   const [maxZ, setMaxZ] = useState(12);
 
   const handleSaveSession = async (newEntries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => {
+    const now = new Date().toISOString();
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
       id: `s-${Date.now()}-${index}`,
       termId: effectiveActiveTerm?.id || ne.termId || '',
-      departmentId: currentUser?.departmentScope === 'All' ? 'CS' : (currentUser?.departmentScope || 'General')
+      departmentId: currentUser?.departmentScope === 'All' ? 'CS' : (currentUser?.departmentScope || 'General'),
+      createdBy: currentUser?.name || currentUser?.username || 'Unknown',
+      createdAt: now,
+      updatedBy: undefined,
+      updatedAt: undefined,
     }));
     await withSync(async () => {
       // Use scheduleRef.current (not schedule state) — avoids stale closure when two
@@ -358,10 +363,15 @@ const App: React.FC = () => {
   };
 
   const handleUpdateSession = async (updatedEntry: ScheduleEntry) => {
+    const auditedEntry: ScheduleEntry = {
+      ...updatedEntry,
+      updatedBy: currentUser?.name || currentUser?.username || 'Unknown',
+      updatedAt: new Date().toISOString(),
+    };
     await withSync(async () => {
-      const updatedSchedule = scheduleRef.current.map(s => s.id === updatedEntry.id ? updatedEntry : s);
+      const updatedSchedule = scheduleRef.current.map(s => s.id === auditedEntry.id ? auditedEntry : s);
       setScheduleAndRef(updatedSchedule);
-      await DataService.updateEntry(updatedEntry, updatedSchedule);
+      await DataService.updateEntry(auditedEntry, updatedSchedule);
     });
   };
 
@@ -379,7 +389,11 @@ const App: React.FC = () => {
         const nem = totalNewEndMinutes % 60;
         const newEndTime = `${String(neh).padStart(2, '0')}:${String(nem).padStart(2, '0')}`;
 
-        const updatedEntry = { ...entry, day: newDay, startTime: newStartTime, endTime: newEndTime };
+        const updatedEntry = {
+          ...entry, day: newDay, startTime: newStartTime, endTime: newEndTime,
+          updatedBy: currentUser?.name || currentUser?.username || 'Unknown',
+          updatedAt: new Date().toISOString(),
+        };
         const updatedSchedule = scheduleRef.current.map(s => s.id === entryId ? updatedEntry : s);
         setScheduleAndRef(updatedSchedule);
         await DataService.updateEntry(updatedEntry, updatedSchedule);
@@ -455,7 +469,7 @@ const App: React.FC = () => {
 
 
   const handleWipeAllData = async () => {
-    if (!confirm('CRITICAL ACTION: This will delete ALL courses, faculty, rooms, cohorts and scheduled sessions from BOTH local storage and Supabase. Only user accounts and terms will be preserved. Proceed?')) {
+    if (!confirm('CRITICAL ACTION: This will delete ALL modules, faculty, rooms, cohorts and scheduled sessions from BOTH local storage and Supabase. Only user accounts and terms will be preserved. Proceed?')) {
       return;
     }
 
@@ -506,7 +520,7 @@ const App: React.FC = () => {
   // Uses DataService.clearEntity (direct DELETE only, no saveEntity pipeline)
   // so a silent Supabase failure can't restore old data via confirm-after-save.
   const handleWipeEntity = async (
-    tab: 'Modules' | 'Faculties' | 'Rooms' | 'Groups'
+    tab: 'Modules' | 'Faculties' | 'Rooms' | 'Cohorts'
   ) => {
     const termId = effectiveActiveTerm?.id;
     const termName = effectiveActiveTerm?.name || termId || 'active term';
@@ -525,7 +539,7 @@ const App: React.FC = () => {
       } else if (tab === 'Rooms') {
         await DataService.clearEntity('rooms', 'unitime_rooms', termId);
         setRooms(prev => prev.filter((r: any) => r.termId !== termId));
-      } else if (tab === 'Groups') {
+      } else if (tab === 'Cohorts') {
         await DataService.clearEntity('groups', 'unitime_groups', termId);
         setGroups(prev => prev.filter((g: any) => g.termId !== termId));
       }
@@ -887,7 +901,7 @@ const App: React.FC = () => {
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
-          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} cohorts={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadCohorts={handleUpdateGroups} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
           {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
         </div>
       </main>

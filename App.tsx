@@ -14,8 +14,8 @@ import Login from './components/Login';
 import SupabaseSetup from './components/SupabaseSetup';
 import ReportsPanel from './components/ReportsPanel';
 import RoomAvailabilityTool from './components/RoomAvailabilityTool';
-import { 
-  Term, Course, Faculty, Room, StudentGroup, ScheduleEntry, Clash, Role, ViewType, UserAccount 
+import {
+  Term, Course, Faculty, Room, StudentGroup, ScheduleEntry, Clash, Role, ViewType, UserAccount, DayOfWeek
 } from './types';
 import { 
   MOCK_TERMS, MOCK_COURSES, MOCK_FACULTY, MOCK_ROOMS, MOCK_GROUPS 
@@ -56,6 +56,15 @@ const App: React.FC = () => {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
+
+  // Undo/redo stacks — stored in refs so keyboard handler always sees current value
+  const undoStackRef = useRef<ScheduleEntry[][]>([]);
+  const redoStackRef = useRef<ScheduleEntry[][]>([]);
+
+  const pushHistory = () => {
+    undoStackRef.current = [...undoStackRef.current.slice(-29), [...scheduleRef.current]];
+    redoStackRef.current = [];
+  };
   const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(() => {
     const isSkipped = localStorage.getItem('unitime_skip_supabase') === 'true';
     return !!supabase || isSkipped;
@@ -331,6 +340,7 @@ const App: React.FC = () => {
   const [maxZ, setMaxZ] = useState(12);
 
   const handleSaveSession = async (newEntries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => {
+    pushHistory();
     const now = new Date().toISOString();
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
@@ -356,6 +366,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteSession = async (id: string) => {
+    pushHistory();
     await withSync(async () => {
       const updatedSchedule = scheduleRef.current.filter(s => s.id !== id);
       setScheduleAndRef(updatedSchedule);
@@ -364,6 +375,7 @@ const App: React.FC = () => {
   };
 
   const handleUpdateSession = async (updatedEntry: ScheduleEntry) => {
+    pushHistory();
     const auditedEntry: ScheduleEntry = {
       ...updatedEntry,
       updatedBy: currentUser?.name || currentUser?.username || 'Unknown',
@@ -377,6 +389,7 @@ const App: React.FC = () => {
   };
 
   const handleMoveSession = async (entryId: string, newDay: any, newStartTime: string) => {
+    pushHistory();
     await withSync(async () => {
       const entry = scheduleRef.current.find(s => s.id === entryId);
       if (entry) {
@@ -403,6 +416,7 @@ const App: React.FC = () => {
   };
 
   const handleDuplicateSession = async (entry: ScheduleEntry) => {
+    pushHistory();
     await withSync(async () => {
       const duplicatedEntry: ScheduleEntry = { ...entry, id: `s-${Date.now()}-dup` };
       const updatedSchedule = [...scheduleRef.current, duplicatedEntry];
@@ -410,6 +424,103 @@ const App: React.FC = () => {
       await DataService.addEntries([duplicatedEntry], updatedSchedule);
     });
   };
+
+  const handleCopyToPanel = async (entryId: string, destViewType: ViewType, destViewId: string, newDay: DayOfWeek, newStartTime: string) => {
+    const entry = scheduleRef.current.find(s => s.id === entryId);
+    if (!entry) return;
+    const [sh, sm] = entry.startTime.split(':').map(Number);
+    const [eh, em] = entry.endTime.split(':').map(Number);
+    const durationMinutes = (eh * 60 + em) - (sh * 60 + sm);
+    const [nsh, nsm] = newStartTime.split(':').map(Number);
+    const newEndMinutes = nsh * 60 + nsm + durationMinutes;
+    const newEndTime = `${String(Math.floor(newEndMinutes / 60)).padStart(2, '0')}:${String(newEndMinutes % 60).padStart(2, '0')}`;
+    const newEntry: Omit<ScheduleEntry, 'id' | 'departmentId'> = {
+      ...entry,
+      day: newDay,
+      startTime: newStartTime,
+      endTime: newEndTime,
+      groupIds: destViewType === 'Group' && destViewId && destViewId !== '__ALL__' ? [destViewId] : entry.groupIds,
+      roomId: destViewType === 'Room' && destViewId && destViewId !== '__ALL__' ? destViewId : entry.roomId,
+      facultyId: destViewType === 'Faculty' && destViewId && destViewId !== '__ALL__' ? destViewId : entry.facultyId,
+    };
+    await handleSaveSession([newEntry]);
+  };
+
+  const handleUndo = async () => {
+    if (undoStackRef.current.length === 0) return;
+    const target = undoStackRef.current.pop()!;
+    redoStackRef.current = [...redoStackRef.current, [...scheduleRef.current]];
+    const current = [...scheduleRef.current];
+    setScheduleAndRef(target);
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    try {
+      const toDelete = current.filter(c => !target.some(t => t.id === c.id));
+      const toAdd = target.filter(t => !current.some(c => c.id === t.id));
+      const toUpdate = target.filter(t => {
+        const curr = current.find(c => c.id === t.id);
+        return curr && JSON.stringify(curr) !== JSON.stringify(t);
+      });
+      for (const e of toDelete) await DataService.deleteEntry(e.id, target);
+      if (toAdd.length > 0) await DataService.addEntries(toAdd, target);
+      for (const e of toUpdate) await DataService.updateEntry(e, target);
+    } catch (err: any) {
+      console.error('[Undo Error]', err);
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => { isSyncingRef.current = false; }, 500);
+    }
+  };
+
+  const handleRedo = async () => {
+    if (redoStackRef.current.length === 0) return;
+    const target = redoStackRef.current.pop()!;
+    undoStackRef.current = [...undoStackRef.current, [...scheduleRef.current]];
+    const current = [...scheduleRef.current];
+    setScheduleAndRef(target);
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    try {
+      const toDelete = current.filter(c => !target.some(t => t.id === c.id));
+      const toAdd = target.filter(t => !current.some(c => c.id === t.id));
+      const toUpdate = target.filter(t => {
+        const curr = current.find(c => c.id === t.id);
+        return curr && JSON.stringify(curr) !== JSON.stringify(t);
+      });
+      for (const e of toDelete) await DataService.deleteEntry(e.id, target);
+      if (toAdd.length > 0) await DataService.addEntries(toAdd, target);
+      for (const e of toUpdate) await DataService.updateEntry(e, target);
+    } catch (err: any) {
+      console.error('[Redo Error]', err);
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => { isSyncingRef.current = false; }, 500);
+    }
+  };
+
+  // Keyboard listener for Ctrl+Z / Ctrl+Y — uses refs to avoid stale closure
+  const handleUndoRef = useRef(handleUndo);
+  const handleRedoRef = useRef(handleRedo);
+  handleUndoRef.current = handleUndo;
+  handleRedoRef.current = handleRedo;
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      const isInput = active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA' || (active as HTMLElement)?.isContentEditable;
+      if (isInput) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndoRef.current();
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        handleRedoRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleUpdateUsers = async (updatedUsers: UserAccount[]) => {
     const deletedIds = users.filter(old => !updatedUsers.some(newIt => newIt.id === old.id)).map(c => c.id);
@@ -893,6 +1004,7 @@ const App: React.FC = () => {
                         onDuplicateEntry={handleDuplicateSession}
                         onDeleteEntry={handleDeleteSession}
                         onPasteEntry={(entry) => handleSaveSession([entry])}
+                        onCopyToPanel={handleCopyToPanel}
                         isMaximized={maximizedPanelId === panel.id}
                         onMaximize={() => setMaximizedPanelId(maximizedPanelId === panel.id ? null : panel.id)}
                         clipboard={clipboard}

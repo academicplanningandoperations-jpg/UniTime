@@ -38,6 +38,7 @@ interface TimetablePanelProps {
   onDuplicateEntry?: (entry: ScheduleEntry) => void;
   onDeleteEntry?: (entryId: string) => void;
   onPasteEntry?: (entry: Omit<ScheduleEntry, 'id' | 'departmentId'>) => void;
+  onCopyToPanel?: (entryId: string, destViewType: ViewType, destViewId: string, newDay: DayOfWeek, newStartTime: string) => void;
   clipboard: Partial<ScheduleEntry> | null;
   setClipboard: (entry: Partial<ScheduleEntry> | null) => void;
   isMaximized?: boolean;
@@ -46,11 +47,11 @@ interface TimetablePanelProps {
   activeTermId?: string;
 }
 
-const TimetablePanel: React.FC<TimetablePanelProps> = ({ 
-  viewType, viewId, entries, rooms, faculties, groups, courses, x, y, w, h, z,
-  onRemove, onUpdateView, onUpdateGeometry, onFocus, onCellClick, onEntryClick, 
-  onMoveEntry, onDuplicateEntry, onDeleteEntry, onPasteEntry, clipboard, setClipboard, 
-  isMaximized = false, onMaximize, isMobile = false, activeTermId
+const TimetablePanel: React.FC<TimetablePanelProps> = ({
+  id, viewType, viewId, entries, rooms, faculties, groups, courses, x, y, w, h, z,
+  onRemove, onUpdateView, onUpdateGeometry, onFocus, onCellClick, onEntryClick,
+  onMoveEntry, onDuplicateEntry, onDeleteEntry, onPasteEntry, onCopyToPanel,
+  clipboard, setClipboard, isMaximized = false, onMaximize, isMobile = false, activeTermId
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [resizeDir, setResizeDir] = useState<string | null>(null);
@@ -88,6 +89,11 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
   }, [viewType, rooms, faculties, groups, courses, searchQuery]);
 
   const activeObjectName = useMemo(() => {
+    if (viewId === '__ALL__') {
+      if (viewType === 'Group') return 'All Cohorts';
+      if (viewType === 'Faculty') return 'All Faculty';
+      return `All ${viewType}s`;
+    }
     if (viewType === 'Room') return rooms.find(r => r.id === viewId)?.name;
     if (viewType === 'Faculty') {
       const f = faculties.find(f => f.id === viewId);
@@ -105,15 +111,15 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
     return entries.filter(e => {
       const matchesTerm = !activeTermId || e.termId === activeTermId;
       if (!matchesTerm) return false;
-
-      const matchesTarget = 
+      const matchesWeek = e.weeks?.some(w => selectedWeeks.includes(w));
+      if (!matchesWeek) return false;
+      if (viewId === '__ALL__') return true;
+      return (
         (viewType === 'Room' && e.roomId === viewId) ||
         (viewType === 'Faculty' && e.facultyId === viewId) ||
         (viewType === 'Group' && e.groupIds?.includes(viewId)) ||
-        (viewType === 'Course' && e.courseId === viewId);
-      
-      const matchesWeek = e.weeks?.some(w => selectedWeeks.includes(w));
-      return matchesTarget && matchesWeek;
+        (viewType === 'Course' && e.courseId === viewId)
+      );
     });
   }, [entries, viewType, viewId, selectedWeeks, activeTermId]);
 
@@ -202,18 +208,24 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
 
   const handleDragStart = (e: React.DragEvent, entry: ScheduleEntry) => {
     e.dataTransfer.setData('entryId', entry.id);
-    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('sourcePanelId', id);
+    e.dataTransfer.effectAllowed = 'copyMove';
   };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
   };
 
   const handleDrop = (e: React.DragEvent, day: DayOfWeek, time: string) => {
     e.preventDefault();
     const entryId = e.dataTransfer.getData('entryId');
-    if (entryId) {
+    const sourcePanelId = e.dataTransfer.getData('sourcePanelId');
+    if (!entryId) return;
+    const isCrossPanel = sourcePanelId && sourcePanelId !== id;
+    if (isCrossPanel || e.ctrlKey) {
+      onCopyToPanel?.(entryId, viewType, viewId, day, time);
+    } else {
       onMoveEntry?.(entryId, day, time);
     }
   };
@@ -324,11 +336,19 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     />
                   </div>
                   <div className="max-h-72 overflow-y-auto p-1 text-black custom-scrollbar bg-white">
+                    {/* Pinned "All" option — always visible, not filtered by search */}
+                    <button
+                      onClick={() => { onUpdateView?.(viewType, '__ALL__'); setIsSelectorOpen(false); setSearchQuery(''); }}
+                      className={`w-full text-left px-3 py-2 text-xs font-bold transition-all border mb-0.5 ${viewId === '__ALL__' ? 'bg-[#185baf] text-white border-[#0d47a1]' : 'bg-[#f8f9fa] hover:bg-[#185baf] hover:text-white text-[#333] border-[#e0e0e0]'}`}
+                    >
+                      ★ {viewType === 'Group' ? 'All Cohorts' : viewType === 'Faculty' ? 'All Faculty' : `All ${viewType}s`}
+                    </button>
+                    <div className="border-t border-[#eee] my-1" />
                     {resourceOptions.length > 0 ? (
                       resourceOptions.map(opt => (
-                        <button 
-                          key={opt.id} 
-                          onClick={() => { onUpdateView?.(viewType, opt.id); setIsSelectorOpen(false); setSearchQuery(''); }} 
+                        <button
+                          key={opt.id}
+                          onClick={() => { onUpdateView?.(viewType, opt.id); setIsSelectorOpen(false); setSearchQuery(''); }}
                           className={`w-full text-left px-3 py-2 text-xs font-bold transition-all border border-transparent mb-0.5 ${viewId === opt.id ? 'bg-[#185baf] text-white border-[#0d47a1]' : 'hover:bg-[#f0f0f0] hover:border-[#ccc] text-[#333]'}`}
                         >
                           {viewType === 'Faculty' ? `${opt.name} (${faculties.find(f => f.id === opt.id)?.facultyId || opt.id})` : opt.name}
@@ -402,6 +422,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
       {/* Grid */}
       <div className="flex-1 bg-white relative overflow-hidden flex flex-col">
         <div className="absolute inset-0 overflow-auto custom-scrollbar bg-white">
+          {/* viewId '' = nothing selected yet; '__ALL__' = selected but show all */}
           {!viewId ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-white z-[100] p-12 text-center">
                <div className="w-20 h-20 bg-[#f8fafc] rounded-none flex items-center justify-center mb-6 border-4 border-double border-[#185baf]/20 shadow-inner">
@@ -442,7 +463,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     return (
                       <td
                         key={time}
-                        onClick={() => !isCovered && cellEntries.length === 0 && onCellClick?.(day as DayOfWeek, time, viewType, viewId)}
+                        onClick={() => !isCovered && cellEntries.length === 0 && onCellClick?.(day as DayOfWeek, time, viewType, viewId === '__ALL__' ? '' : viewId)}
                         onContextMenu={(e) => !isCovered && handleCellContextMenu(e, day as DayOfWeek, time)}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, day as DayOfWeek, time)}
@@ -452,7 +473,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                         {!isCovered && (
                           <div
                             className="absolute top-0.5 right-0.5 z-50 opacity-0 group-hover/cell:opacity-100 transition-opacity"
-                            onClick={(e) => { e.stopPropagation(); onCellClick?.(day as DayOfWeek, time, viewType, viewId); }}
+                            onClick={(e) => { e.stopPropagation(); onCellClick?.(day as DayOfWeek, time, viewType, viewId === '__ALL__' ? '' : viewId); }}
                           >
                             <Plus className="w-3.5 h-3.5 text-[#185baf] bg-white rounded-full shadow-md border border-[#185baf] p-0.5" />
                           </div>

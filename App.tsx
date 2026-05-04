@@ -439,11 +439,23 @@ const App: React.FC = () => {
       day: newDay,
       startTime: newStartTime,
       endTime: newEndTime,
-      groupIds: destViewType === 'Group' && destViewId && destViewId !== '__ALL__' ? [destViewId] : entry.groupIds,
-      roomId: destViewType === 'Room' && destViewId && destViewId !== '__ALL__' ? destViewId : entry.roomId,
-      facultyId: destViewType === 'Faculty' && destViewId && destViewId !== '__ALL__' ? destViewId : entry.facultyId,
+      groupIds: destViewType === 'Group' && destViewId ? [destViewId] : entry.groupIds,
+      roomId: destViewType === 'Room' && destViewId ? destViewId : entry.roomId,
+      facultyId: destViewType === 'Faculty' && destViewId ? destViewId : entry.facultyId,
     };
     await handleSaveSession([newEntry]);
+  };
+
+  const handleCtrlDragCopy = async (entryId: string, newDay: DayOfWeek, newStartTime: string) => {
+    const entry = scheduleRef.current.find(s => s.id === entryId);
+    if (!entry) return;
+    const [sh, sm] = entry.startTime.split(':').map(Number);
+    const [eh, em] = entry.endTime.split(':').map(Number);
+    const durationMinutes = (eh * 60 + em) - (sh * 60 + sm);
+    const [nsh, nsm] = newStartTime.split(':').map(Number);
+    const newEndMinutes = nsh * 60 + nsm + durationMinutes;
+    const newEndTime = `${String(Math.floor(newEndMinutes / 60)).padStart(2, '0')}:${String(newEndMinutes % 60).padStart(2, '0')}`;
+    await handleSaveSession([{ ...entry, day: newDay, startTime: newStartTime, endTime: newEndTime }]);
   };
 
   const handleUndo = async () => {
@@ -1005,6 +1017,7 @@ const App: React.FC = () => {
                         onDeleteEntry={handleDeleteSession}
                         onPasteEntry={(entry) => handleSaveSession([entry])}
                         onCopyToPanel={handleCopyToPanel}
+                        onCtrlDragCopy={handleCtrlDragCopy}
                         isMaximized={maximizedPanelId === panel.id}
                         onMaximize={() => setMaximizedPanelId(maximizedPanelId === panel.id ? null : panel.id)}
                         clipboard={clipboard}

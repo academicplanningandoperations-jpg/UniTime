@@ -10,7 +10,7 @@ const SCHEMA: Record<string, string[]> = {
   faculties: ['id', 'facultyId', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],
   rooms:     ['id', 'termId', 'name', 'capacity', 'type'],
   groups:    ['id', 'termId', 'name', 'program', 'semester', 'studentCount'],
-  schedule:  ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt'],
+  schedule:  ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category'],
 };
 
 // Term-scoped tables — all reads/writes are filtered by termId

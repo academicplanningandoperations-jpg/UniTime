@@ -298,7 +298,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         'Module Unique ID': (course as any)?._unique_name || course?.code || '',
         'Module': (course as any)?._name || course?.name || '',
         'Room': (room as any)?._unique_name || room?.name || '',
-        'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
+        'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.facultyId || faculty?.id || '',
         'Faculty_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
       };
 
@@ -347,32 +347,55 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         eventMap.forEach((eventRows) => {
           const firstRow = eventRows[0];
           const moduleUniqueId = String(firstRow['Module Unique ID'] || '').trim();
-          const facultyId = String(firstRow['Faculty_ID'] || '').trim();
+          const facultyIdRaw = String(firstRow['Faculty_ID'] || '').trim();
+          const facultyNameRaw = String(firstRow['Faculty_Name'] || '').trim();
           const roomUniqueName = String(firstRow['Room'] || '').trim();
 
+          // ── Course lookup ──────────────────────────────────────────────
+          // Try: _unique_name (CSV import field, lost after reload)
+          //      code (schema-persisted, set to _unique_name during import)
+          //      name match as last resort
           const course = courses.find(c =>
-            (c as any)._unique_name === moduleUniqueId || c.code === moduleUniqueId
+            (c as any)._unique_name === moduleUniqueId ||
+            c.code === moduleUniqueId ||
+            (moduleUniqueId && c.code?.toLowerCase() === moduleUniqueId.toLowerCase())
           );
+
+          // ── Faculty lookup (CRITICAL FIX) ──────────────────────────────
+          // Previously only checked _Faculty_ID (stripped by sanitize) and f.id (compound).
+          // Now also checks f.facultyId (schema-persisted, set to _Faculty_ID during import).
           const faculty = faculties.find(f =>
-            (f as any)._Faculty_ID === facultyId || f.id === facultyId
+            (f as any)._Faculty_ID === facultyIdRaw ||
+            f.facultyId === facultyIdRaw ||
+            f.id === facultyIdRaw ||
+            (facultyIdRaw && f.facultyId?.toLowerCase() === facultyIdRaw.toLowerCase()) ||
+            (facultyNameRaw && ((f as any)._Faculty_name === facultyNameRaw || f.name === facultyNameRaw))
           );
+
+          // ── Room lookup ────────────────────────────────────────────────
+          // _unique_name is lost after reload but r.name was set to _name || _unique_name
           const room = rooms.find(r =>
-            (r as any)._unique_name === roomUniqueName || r.name === roomUniqueName
+            (r as any)._unique_name === roomUniqueName ||
+            r.name === roomUniqueName ||
+            (roomUniqueName && r.name?.toLowerCase() === roomUniqueName.toLowerCase())
           );
 
           if (!course && moduleUniqueId && !unmatchedModules.includes(moduleUniqueId))
             unmatchedModules.push(moduleUniqueId);
-          if (!faculty && facultyId && !unmatchedFaculties.includes(facultyId))
-            unmatchedFaculties.push(facultyId);
+          if (!faculty && facultyIdRaw && !unmatchedFaculties.includes(facultyIdRaw))
+            unmatchedFaculties.push(facultyIdRaw);
           if (!room && roomUniqueName && !unmatchedRooms.includes(roomUniqueName))
             unmatchedRooms.push(roomUniqueName);
 
+          // ── Cohort lookup ──────────────────────────────────────────────
           const groupIds: string[] = [];
           eventRows.forEach(row => {
             const cohortName = String(row['Cohort'] || '').trim();
             if (cohortName) {
               const group = cohorts.find(g =>
-                (g as any)._unique_name === cohortName || g.name === cohortName
+                (g as any)._unique_name === cohortName ||
+                g.name === cohortName ||
+                (cohortName && g.name?.toLowerCase() === cohortName.toLowerCase())
               );
               if (group) {
                 if (!groupIds.includes(group.id)) groupIds.push(group.id);
@@ -401,6 +424,13 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
           });
         });
 
+        // ── Validation: warn if most events have empty foreign keys ────
+        const emptyCourseCt = events.filter(e => !e.courseId).length;
+        const emptyFacultyCt = events.filter(e => !e.facultyId).length;
+        const emptyRoomCt = events.filter(e => !e.roomId).length;
+        const total = events.length;
+        const hasBlankWarning = emptyCourseCt > total * 0.5 || emptyFacultyCt > total * 0.5 || emptyRoomCt > total * 0.5;
+
         setRestorePreview({
           events,
           unmatched: {
@@ -410,6 +440,14 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
             cohorts: unmatchedCohorts,
           }
         });
+
+        if (hasBlankWarning) {
+          const parts: string[] = [];
+          if (emptyCourseCt > 0) parts.push(`${emptyCourseCt}/${total} events have no matching module`);
+          if (emptyFacultyCt > 0) parts.push(`${emptyFacultyCt}/${total} events have no matching faculty`);
+          if (emptyRoomCt > 0) parts.push(`${emptyRoomCt}/${total} events have no matching room`);
+          alert(`⚠️ Backup Match Warning:\n\n${parts.join('\n')}\n\nThis usually means the resource data was reloaded from Supabase and lost custom CSV fields. Check the unmatched list in the preview panel.`);
+        }
       } catch {
         alert('Failed to parse file. Please upload a valid timetable backup Excel (.xlsx) file.');
       }

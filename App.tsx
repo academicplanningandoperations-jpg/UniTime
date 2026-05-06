@@ -877,7 +877,7 @@ const App: React.FC = () => {
           'Module Unique ID': (course as any)?._unique_name || course?.code || '',
           'Module': (course as any)?._name || course?.name || '',
           'Room': (room as any)?._unique_name || room?.name || '',
-          'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
+          'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.facultyId || faculty?.id || '',
           'Faculty_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
         };
 

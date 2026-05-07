@@ -504,11 +504,14 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
           {(() => {
             const filtered = clashTypeFilter === 'all' ? clashes : clashes.filter(c => c.type === clashTypeFilter);
 
-            const typeConfig = {
-              Room: { color: 'bg-red-50 border-red-200', badge: 'bg-red-100 text-red-700 border-red-300', icon: <MapPin className="w-3.5 h-3.5" />, label: 'Room Clash' },
-              Faculty: { color: 'bg-amber-50 border-amber-200', badge: 'bg-amber-100 text-amber-700 border-amber-300', icon: <User className="w-3.5 h-3.5" />, label: 'Faculty Clash' },
-              Cohort: { color: 'bg-blue-50 border-blue-200', badge: 'bg-blue-100 text-blue-700 border-blue-300', icon: <Users className="w-3.5 h-3.5" />, label: 'Cohort Clash' },
-              LoadViolation: { color: 'bg-purple-50 border-purple-200', badge: 'bg-purple-100 text-purple-700 border-purple-300', icon: <AlertTriangle className="w-3.5 h-3.5" />, label: 'Load Violation' },
+            const typeBadge: Record<string, string> = {
+              Room: 'bg-red-100 text-red-700 border-red-300',
+              Faculty: 'bg-amber-100 text-amber-700 border-amber-300',
+              Cohort: 'bg-blue-100 text-blue-700 border-blue-300',
+              LoadViolation: 'bg-purple-100 text-purple-700 border-purple-300',
+            };
+            const typeLabel: Record<string, string> = {
+              Room: 'Room', Faculty: 'Faculty', Cohort: 'Cohort', LoadViolation: 'Load',
             };
 
             if (filtered.length === 0) return (
@@ -520,93 +523,107 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
               </div>
             );
 
+            const thBase = 'px-2 py-2 text-left text-[9px] font-black uppercase tracking-wider text-[#555] border-b border-r border-[#ddd] whitespace-nowrap bg-[#f5f5f5]';
+            const tdBase = 'px-2 py-2 text-[10px] border-b border-r border-[#e8e8e8] align-top';
+
             return (
-              <div className="space-y-3 pb-8">
-                {filtered.map((clash, idx) => {
-                  const cfg = typeConfig[clash.type] || typeConfig.Room;
-                  const [id1, id2] = clash.affectedIds;
-                  const e1 = getEntryDetail(id1);
-                  const e2 = clash.type !== 'LoadViolation' ? getEntryDetail(id2) : null;
+              <div className="border border-[#ccc] overflow-hidden">
+                <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
+                  <table className="w-full border-collapse" style={{ minWidth: 1100 }}>
+                    <thead className="sticky top-0 z-10">
+                      {/* Group row */}
+                      <tr>
+                        <th className={`${thBase} text-center`} rowSpan={2}>#</th>
+                        <th className={`${thBase} text-center`} rowSpan={2}>Type</th>
+                        <th className={`${thBase}`} rowSpan={2} style={{ minWidth: 200 }}>Clash Description</th>
+                        <th className={`${thBase} text-center bg-blue-50 text-blue-700 border-blue-200`} colSpan={5}>Session 1</th>
+                        <th className={`${thBase} text-center bg-red-50 text-red-700 border-red-200`} colSpan={5}>Session 2</th>
+                      </tr>
+                      {/* Sub-header row */}
+                      <tr>
+                        {(['Day', 'Time', 'Module', 'Faculty', 'Room / Cohorts'] as const).map(h => (
+                          <th key={`s1-${h}`} className={`${thBase} bg-blue-50 text-blue-600 border-blue-200`}>{h}</th>
+                        ))}
+                        {(['Day', 'Time', 'Module', 'Faculty', 'Room / Cohorts'] as const).map(h => (
+                          <th key={`s2-${h}`} className={`${thBase} bg-red-50 text-red-600 border-red-200`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((clash, idx) => {
+                        const badge = typeBadge[clash.type] || typeBadge.Room;
+                        const label = typeLabel[clash.type] || clash.type;
+                        const isEven = idx % 2 === 0;
+                        const rowBg = isEven ? 'bg-white' : 'bg-[#fafafa]';
 
-                  const SessionBlock = ({ detail, label }: { detail: ReturnType<typeof getEntryDetail>; label: string }) => (
-                    <div className="p-4 space-y-2.5">
-                      <div className="text-[9px] font-black text-[#999] uppercase tracking-[0.15em] mb-3">{label}</div>
-                      {detail ? (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[12px] font-black text-[#185baf]">{detail.day}</span>
-                            <span className="flex items-center gap-1 text-[11px] font-mono bg-[#f0f0f0] border border-[#ddd] px-2 py-0.5 text-[#333]">
-                              <Clock className="w-3 h-3 text-[#999]" />
-                              {detail.startTime} – {detail.endTime}
-                            </span>
-                            {detail.category && (
-                              <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-[#e8f0fe] text-[#185baf] border border-[#c5d6f8]">
-                                {detail.category}
+                        if (clash.type === 'LoadViolation') {
+                          const affected = clash.affectedIds.map(aid => getEntryDetail(aid)).filter(Boolean);
+                          const summary = affected.map(d => `${d!.day} ${d!.startTime}–${d!.endTime} (${d!.module})`).join('; ');
+                          return (
+                            <tr key={idx} className={rowBg}>
+                              <td className={`${tdBase} text-center text-[#999] font-bold`}>{idx + 1}</td>
+                              <td className={`${tdBase} text-center`}>
+                                <span className={`inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 border ${badge}`}>
+                                  <AlertTriangle className="w-3 h-3" />{label}
+                                </span>
+                              </td>
+                              <td className={`${tdBase} font-semibold text-[#333]`}>{clash.message}</td>
+                              <td className={`${tdBase} text-[#555]`} colSpan={10}>
+                                <span className="text-[#185baf] font-bold">{clash.affectedIds.length} sessions affected: </span>
+                                <span className="text-[#666]">{summary || '—'}</span>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        const [id1, id2] = clash.affectedIds;
+                        const e1 = getEntryDetail(id1);
+                        const e2 = getEntryDetail(id2);
+
+                        const SessionCells = ({ d }: { d: ReturnType<typeof getEntryDetail> }) => d ? (
+                          <>
+                            <td className={`${tdBase} font-bold text-[#185baf]`}>{d.day}</td>
+                            <td className={`${tdBase} font-mono text-[#333] whitespace-nowrap`}>{d.startTime}–{d.endTime}</td>
+                            <td className={`${tdBase} font-semibold text-[#333]`} style={{ maxWidth: 160 }}>
+                              <div className="truncate" title={d.module || ''}>{d.module || <span className="text-[#bbb] italic font-normal">—</span>}</div>
+                              {d.category && <div className="text-[8px] font-bold uppercase text-[#185baf] mt-0.5">{d.category}</div>}
+                            </td>
+                            <td className={`${tdBase} text-[#555]`} style={{ maxWidth: 120 }}>
+                              <div className="truncate" title={d.faculty || ''}>{d.faculty || <span className="text-[#bbb] italic">—</span>}</div>
+                            </td>
+                            <td className={`${tdBase} text-[#555]`} style={{ maxWidth: 140 }}>
+                              {d.room && <div className="truncate" title={d.room}>{d.room}</div>}
+                              {d.cohorts && <div className="truncate text-[#888]" title={d.cohorts}>{d.cohorts}</div>}
+                              {!d.room && !d.cohorts && <span className="text-[#bbb] italic">—</span>}
+                            </td>
+                          </>
+                        ) : (
+                          <td className={`${tdBase} text-[#bbb] italic`} colSpan={5}>Session not found</td>
+                        );
+
+                        return (
+                          <tr key={idx} className={rowBg}>
+                            <td className={`${tdBase} text-center text-[#999] font-bold`}>{idx + 1}</td>
+                            <td className={`${tdBase} text-center`}>
+                              <span className={`inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 border ${badge}`}>
+                                {clash.type === 'Room' && <MapPin className="w-3 h-3" />}
+                                {clash.type === 'Faculty' && <User className="w-3 h-3" />}
+                                {clash.type === 'Cohort' && <Users className="w-3 h-3" />}
+                                {label}
                               </span>
-                            )}
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px]">
-                            <BookOpen className="w-3.5 h-3.5 text-[#185baf] mt-0.5 shrink-0" />
-                            <span className="font-bold text-[#333] leading-tight">{detail.module || <span className="text-[#bbb] italic font-normal">No module</span>}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px]">
-                            <User className="w-3.5 h-3.5 text-[#555] shrink-0" />
-                            <span className="text-[#555]">{detail.faculty || <span className="text-[#bbb] italic">No faculty</span>}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px]">
-                            <MapPin className="w-3.5 h-3.5 text-[#555] shrink-0" />
-                            <span className="text-[#555]">{detail.room || <span className="text-[#bbb] italic">No room</span>}</span>
-                          </div>
-                          {detail.cohorts && (
-                            <div className="flex items-start gap-2 text-[11px]">
-                              <Users className="w-3.5 h-3.5 text-[#555] shrink-0 mt-0.5" />
-                              <span className="text-[#555] leading-snug">{detail.cohorts}</span>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-[11px] text-[#bbb] italic">Session not found</p>
-                      )}
-                    </div>
-                  );
-
-                  return (
-                    <div key={idx} className={`border rounded-none overflow-hidden shadow-sm ${cfg.color}`}>
-                      {/* Clash header */}
-                      <div className="px-4 py-2.5 flex items-center gap-3 bg-white border-b border-[#e0e0e0]">
-                        <span className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 border ${cfg.badge} shrink-0`}>
-                          {cfg.icon} {cfg.label}
-                        </span>
-                        <p className="text-[11px] font-bold text-[#333] leading-snug flex-1">{clash.message}</p>
-                        <span className="text-[10px] text-[#999] font-bold shrink-0">#{idx + 1}</span>
-                      </div>
-
-                      {/* Session details */}
-                      {clash.type !== 'LoadViolation' ? (
-                        <div className="grid grid-cols-2 divide-x divide-[#e0e0e0]">
-                          <SessionBlock detail={e1} label="Session 1 (conflicting)" />
-                          <SessionBlock detail={e2} label="Session 2 (conflicting)" />
-                        </div>
-                      ) : (
-                        <div className="p-4">
-                          <p className="text-[10px] font-black text-[#999] uppercase tracking-widest mb-3">Affected sessions ({clash.affectedIds.length})</p>
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                            {clash.affectedIds.map((aid, ai) => {
-                              const d = getEntryDetail(aid);
-                              return d ? (
-                                <div key={ai} className="bg-white border border-[#e0e0e0] px-3 py-2 text-[11px] space-y-0.5">
-                                  <div className="font-black text-[#185baf]">{d.day} <span className="font-mono">{d.startTime}–{d.endTime}</span></div>
-                                  <div className="font-bold text-[#333] truncate">{d.module}</div>
-                                  <div className="text-[#666]">{d.cohorts}</div>
-                                </div>
-                              ) : null;
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                            </td>
+                            <td className={`${tdBase} font-semibold text-[#333]`}>{clash.message}</td>
+                            <SessionCells d={e1} />
+                            <SessionCells d={e2} />
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-3 py-2 bg-[#f5f5f5] border-t border-[#ddd] text-[10px] font-bold text-[#666] uppercase tracking-wider">
+                  {filtered.length} clash{filtered.length !== 1 ? 'es' : ''} {clashTypeFilter !== 'all' ? `· filtered by ${clashTypeFilter}` : ''}
+                </div>
               </div>
             );
           })()}

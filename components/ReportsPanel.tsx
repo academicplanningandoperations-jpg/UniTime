@@ -15,6 +15,7 @@ interface ReportsPanelProps {
   currentUser: UserAccount;
   activeTermId?: string;
   onDeleteEntry?: (id: string) => void;
+  onDeleteMultiple?: (ids: string[]) => Promise<void>;
 }
 
 const ReportsPanel: React.FC<ReportsPanelProps> = ({
@@ -27,12 +28,15 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
   clashes,
   currentUser,
   activeTermId,
-  onDeleteEntry
+  onDeleteEntry,
+  onDeleteMultiple
 }) => {
   const [activeReportTab, setActiveReportTab] = useState<'reports' | 'entries'>('reports');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<string>('day');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const isAdmin = currentUser.role === Role.ADMIN || currentUser.role === Role.SUPER_ADMIN;
 
@@ -467,13 +471,32 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                 <button onClick={() => setSearchQuery('')} className="text-[#999] hover:text-[#333] text-xs font-bold">✕</button>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[11px] font-bold text-[#666] uppercase tracking-wider">
                 {sortedEntries.length} of {activeSchedule.length} entries
               </span>
-              {isAdmin && sortedEntries.length > 0 && (
+              {isAdmin && selectedIds.size > 0 && onDeleteMultiple && (
+                <button
+                  disabled={isDeleting}
+                  onClick={async () => {
+                    if (!confirm(`Permanently delete ${selectedIds.size} selected session${selectedIds.size > 1 ? 's' : ''}?`)) return;
+                    setIsDeleting(true);
+                    try {
+                      await onDeleteMultiple([...selectedIds]);
+                      setSelectedIds(new Set());
+                    } finally {
+                      setIsDeleting(false);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ac2925] text-white text-[11px] font-bold uppercase hover:bg-[#8a2020] transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  {isDeleting ? 'Deleting…' : `Delete Selected (${selectedIds.size})`}
+                </button>
+              )}
+              {isAdmin && selectedIds.size === 0 && sortedEntries.length > 0 && (
                 <span className="text-[10px] text-[#ac2925] font-bold uppercase tracking-wider border border-[#ac2925] px-2 py-0.5">
-                  Admin: Delete enabled
+                  Admin: Select rows to delete
                 </span>
               )}
             </div>
@@ -493,6 +516,17 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                   <table className="w-full text-left border-collapse text-xs">
                     <thead className="bg-[#f0f0f0] sticky top-0 z-10 border-b-2 border-[#185baf]">
                       <tr>
+                        {isAdmin && onDeleteMultiple && (
+                          <th className="px-3 py-2 w-8">
+                            <input
+                              type="checkbox"
+                              className="w-3.5 h-3.5 accent-[#185baf]"
+                              checked={sortedEntries.length > 0 && sortedEntries.every(e => selectedIds.has(e.id))}
+                              onChange={ev => setSelectedIds(ev.target.checked ? new Set(sortedEntries.map(e => e.id)) : new Set())}
+                              title="Select all visible"
+                            />
+                          </th>
+                        )}
                         <th className="px-3 py-2 text-[11px] font-bold text-[#185baf] uppercase w-8">#</th>
                         <ThBtn field="day" label="Day" />
                         <ThBtn field="time" label="Time" />
@@ -513,7 +547,21 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                     </thead>
                     <tbody className="divide-y divide-[#eee]">
                       {sortedEntries.map((entry, idx) => (
-                        <tr key={entry.id} className="hover:bg-[#f5f8ff] transition-colors">
+                        <tr key={entry.id} className={`transition-colors ${selectedIds.has(entry.id) ? 'bg-[#e8f0fe]' : 'hover:bg-[#f5f8ff]'}`}>
+                          {isAdmin && onDeleteMultiple && (
+                            <td className="px-3 py-2">
+                              <input
+                                type="checkbox"
+                                className="w-3.5 h-3.5 accent-[#185baf]"
+                                checked={selectedIds.has(entry.id)}
+                                onChange={() => {
+                                  const next = new Set(selectedIds);
+                                  next.has(entry.id) ? next.delete(entry.id) : next.add(entry.id);
+                                  setSelectedIds(next);
+                                }}
+                              />
+                            </td>
+                          )}
                           <td className="px-3 py-2 text-[#999] font-bold">{idx + 1}</td>
                           <td className="px-3 py-2 font-bold text-[#185baf] whitespace-nowrap">{entry.day}</td>
                           <td className="px-3 py-2 whitespace-nowrap font-mono text-[11px]">

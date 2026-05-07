@@ -302,10 +302,22 @@ export class DataService {
   static async addEntries(newEntries: ScheduleEntry[], allEntries: ScheduleEntry[]): Promise<void> {
     try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
     if (!supabase || newEntries.length === 0) return;
+    // Use upsertBatch (500-row chunks + retries) — a single upsert silently fails
+    // for large restores (100+ rows on Supabase free tier).
+    this.lastWriteTimestamp = Date.now();
     const sanitized = newEntries.map(e => this.sanitize('schedule', e, e.termId));
-    const { error } = await supabase.from('schedule').upsert(sanitized, { onConflict: 'id' });
-    if (error) console.error('[DB] addEntries error:', error.message);
+    const err = await this.upsertBatch('schedule', sanitized);
+    this.lastWriteTimestamp = Date.now();
+    if (err) console.error('[DB] addEntries error:', err);
     else console.log(`[DB] schedule: added ${newEntries.length} entries`);
+  }
+
+  static async deleteEntries(ids: string[], allEntries: ScheduleEntry[]): Promise<void> {
+    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
+    if (!supabase || ids.length === 0) return;
+    const { error } = await supabase.from('schedule').delete().in('id', ids);
+    if (error) console.error('[DB] deleteEntries error:', error.message);
+    else console.log(`[DB] schedule: bulk-deleted ${ids.length} entries`);
   }
 
   static async updateEntry(entry: ScheduleEntry, allEntries: ScheduleEntry[]): Promise<void> {

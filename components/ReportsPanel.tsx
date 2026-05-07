@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { FileText, Download, Table, AlertTriangle, Calendar, Users, Briefcase, List, Trash2, Search, ChevronUp, ChevronDown } from 'lucide-react';
+import { FileText, Download, Table, AlertTriangle, Calendar, Users, Briefcase, List, Trash2, Search, ChevronUp, ChevronDown, User, MapPin, BookOpen, Clock, ShieldAlert } from 'lucide-react';
 import { ScheduleEntry, Course, Faculty, Room, StudentGroup, Term, Clash, UserAccount, Role } from '../types';
 import { DataService } from '../services/dataService';
 
@@ -31,7 +31,8 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
   onDeleteEntry,
   onDeleteMultiple
 }) => {
-  const [activeReportTab, setActiveReportTab] = useState<'reports' | 'entries'>('reports');
+  const [activeReportTab, setActiveReportTab] = useState<'reports' | 'entries' | 'clashes'>('reports');
+  const [clashTypeFilter, setClashTypeFilter] = useState<'all' | 'Room' | 'Faculty' | 'Cohort' | 'LoadViolation'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<string>('day');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -382,6 +383,22 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
             {activeSchedule.length}
           </span>
         </button>
+        <button
+          onClick={() => setActiveReportTab('clashes')}
+          className={`flex items-center gap-2 px-5 py-2 text-[12px] font-bold border-b-2 transition-all ${
+            activeReportTab === 'clashes'
+              ? 'border-[#ac2925] text-[#ac2925] bg-white'
+              : 'border-transparent text-[#666] hover:text-[#ac2925] hover:bg-[#f5f5f5]'
+          }`}
+        >
+          <ShieldAlert className="w-3.5 h-3.5" />
+          Clashes
+          {clashes.length > 0 && (
+            <span className="ml-1 bg-[#ac2925] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-sm">
+              {clashes.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* ── REPORTS TAB ── */}
@@ -452,6 +469,148 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
             </div>
           </div>
         </>
+      )}
+
+      {/* ── CLASHES TAB ── */}
+      {activeReportTab === 'clashes' && (
+        <div className="mx-2 space-y-3">
+          {/* Filter chips */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {([
+              { key: 'all', label: `All Clashes`, count: clashes.length },
+              { key: 'Room', label: 'Room', count: clashes.filter(c => c.type === 'Room').length },
+              { key: 'Faculty', label: 'Faculty', count: clashes.filter(c => c.type === 'Faculty').length },
+              { key: 'Cohort', label: 'Cohort', count: clashes.filter(c => c.type === 'Cohort').length },
+              { key: 'LoadViolation', label: 'Load Violations', count: clashes.filter(c => c.type === 'LoadViolation').length },
+            ] as const).map(({ key, label, count }) => (
+              <button
+                key={key}
+                onClick={() => setClashTypeFilter(key)}
+                className={`px-3 py-1 text-[11px] font-bold uppercase border transition-all flex items-center gap-1.5 ${
+                  clashTypeFilter === key
+                    ? 'bg-[#185baf] text-white border-[#185baf]'
+                    : count === 0 ? 'bg-[#fafafa] text-[#bbb] border-[#e0e0e0] cursor-default'
+                    : 'bg-white text-[#555] border-[#ccc] hover:border-[#185baf] hover:text-[#185baf]'
+                }`}
+              >
+                {label}
+                <span className={`text-[9px] font-black px-1 py-0.5 ${clashTypeFilter === key ? 'bg-white/20' : 'bg-[#f0f0f0]'}`}>
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {(() => {
+            const filtered = clashTypeFilter === 'all' ? clashes : clashes.filter(c => c.type === clashTypeFilter);
+
+            const typeConfig = {
+              Room: { color: 'bg-red-50 border-red-200', badge: 'bg-red-100 text-red-700 border-red-300', icon: <MapPin className="w-3.5 h-3.5" />, label: 'Room Clash' },
+              Faculty: { color: 'bg-amber-50 border-amber-200', badge: 'bg-amber-100 text-amber-700 border-amber-300', icon: <User className="w-3.5 h-3.5" />, label: 'Faculty Clash' },
+              Cohort: { color: 'bg-blue-50 border-blue-200', badge: 'bg-blue-100 text-blue-700 border-blue-300', icon: <Users className="w-3.5 h-3.5" />, label: 'Cohort Clash' },
+              LoadViolation: { color: 'bg-purple-50 border-purple-200', badge: 'bg-purple-100 text-purple-700 border-purple-300', icon: <AlertTriangle className="w-3.5 h-3.5" />, label: 'Load Violation' },
+            };
+
+            if (filtered.length === 0) return (
+              <div className="py-16 bg-[#f9f9f9] border border-[#ccc] flex flex-col items-center justify-center text-center">
+                <ShieldAlert className="w-8 h-8 text-[#ccc] mb-3" />
+                <p className="text-[12px] font-bold text-[#666] uppercase tracking-wide">
+                  {clashes.length === 0 ? 'No clashes detected — timetable is clean' : 'No clashes match the selected filter'}
+                </p>
+              </div>
+            );
+
+            return (
+              <div className="space-y-3 pb-8">
+                {filtered.map((clash, idx) => {
+                  const cfg = typeConfig[clash.type] || typeConfig.Room;
+                  const [id1, id2] = clash.affectedIds;
+                  const e1 = getEntryDetail(id1);
+                  const e2 = clash.type !== 'LoadViolation' ? getEntryDetail(id2) : null;
+
+                  const SessionBlock = ({ detail, label }: { detail: ReturnType<typeof getEntryDetail>; label: string }) => (
+                    <div className="p-4 space-y-2.5">
+                      <div className="text-[9px] font-black text-[#999] uppercase tracking-[0.15em] mb-3">{label}</div>
+                      {detail ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[12px] font-black text-[#185baf]">{detail.day}</span>
+                            <span className="flex items-center gap-1 text-[11px] font-mono bg-[#f0f0f0] border border-[#ddd] px-2 py-0.5 text-[#333]">
+                              <Clock className="w-3 h-3 text-[#999]" />
+                              {detail.startTime} – {detail.endTime}
+                            </span>
+                            {detail.category && (
+                              <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-[#e8f0fe] text-[#185baf] border border-[#c5d6f8]">
+                                {detail.category}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px]">
+                            <BookOpen className="w-3.5 h-3.5 text-[#185baf] mt-0.5 shrink-0" />
+                            <span className="font-bold text-[#333] leading-tight">{detail.module || <span className="text-[#bbb] italic font-normal">No module</span>}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <User className="w-3.5 h-3.5 text-[#555] shrink-0" />
+                            <span className="text-[#555]">{detail.faculty || <span className="text-[#bbb] italic">No faculty</span>}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <MapPin className="w-3.5 h-3.5 text-[#555] shrink-0" />
+                            <span className="text-[#555]">{detail.room || <span className="text-[#bbb] italic">No room</span>}</span>
+                          </div>
+                          {detail.cohorts && (
+                            <div className="flex items-start gap-2 text-[11px]">
+                              <Users className="w-3.5 h-3.5 text-[#555] shrink-0 mt-0.5" />
+                              <span className="text-[#555] leading-snug">{detail.cohorts}</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-[#bbb] italic">Session not found</p>
+                      )}
+                    </div>
+                  );
+
+                  return (
+                    <div key={idx} className={`border rounded-none overflow-hidden shadow-sm ${cfg.color}`}>
+                      {/* Clash header */}
+                      <div className="px-4 py-2.5 flex items-center gap-3 bg-white border-b border-[#e0e0e0]">
+                        <span className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 border ${cfg.badge} shrink-0`}>
+                          {cfg.icon} {cfg.label}
+                        </span>
+                        <p className="text-[11px] font-bold text-[#333] leading-snug flex-1">{clash.message}</p>
+                        <span className="text-[10px] text-[#999] font-bold shrink-0">#{idx + 1}</span>
+                      </div>
+
+                      {/* Session details */}
+                      {clash.type !== 'LoadViolation' ? (
+                        <div className="grid grid-cols-2 divide-x divide-[#e0e0e0]">
+                          <SessionBlock detail={e1} label="Session 1 (conflicting)" />
+                          <SessionBlock detail={e2} label="Session 2 (conflicting)" />
+                        </div>
+                      ) : (
+                        <div className="p-4">
+                          <p className="text-[10px] font-black text-[#999] uppercase tracking-widest mb-3">Affected sessions ({clash.affectedIds.length})</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {clash.affectedIds.map((aid, ai) => {
+                              const d = getEntryDetail(aid);
+                              return d ? (
+                                <div key={ai} className="bg-white border border-[#e0e0e0] px-3 py-2 text-[11px] space-y-0.5">
+                                  <div className="font-black text-[#185baf]">{d.day} <span className="font-mono">{d.startTime}–{d.endTime}</span></div>
+                                  <div className="font-bold text-[#333] truncate">{d.module}</div>
+                                  <div className="text-[#666]">{d.cohorts}</div>
+                                </div>
+                              ) : null;
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
       )}
 
       {/* ── SCHEDULE ENTRIES TAB ── */}

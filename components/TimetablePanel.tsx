@@ -8,8 +8,8 @@ import { formatTime12h } from '../services/utils';
 
 const TYPE_THEMES = {
   Room:    { headerGrad: 'linear-gradient(135deg, #0e7490 0%, #0891b2 100%)', borderColor: '#0891b2', entryColor: '#0891b2', entryBorder: '#0e7490', accent: '#0891b2' },
-  Faculty: { headerGrad: 'linear-gradient(135deg, #92400e 0%, #b45309 100%)', borderColor: '#b45309', entryColor: '#b45309', entryBorder: '#92400e', accent: '#b45309' },
-  Group:   { headerGrad: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)', borderColor: '#7c3aed', entryColor: '#7c3aed', entryBorder: '#5b21b6', accent: '#7c3aed' },
+  Faculty: { headerGrad: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)', borderColor: '#2563eb', entryColor: '#2563eb', entryBorder: '#1d4ed8', accent: '#2563eb' },
+  Group:   { headerGrad: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)', borderColor: '#14b8a6', entryColor: '#14b8a6', entryBorder: '#0f766e', accent: '#14b8a6' },
   Course:  { headerGrad: 'linear-gradient(135deg, #047857 0%, #059669 100%)', borderColor: '#059669', entryColor: '#059669', entryBorder: '#047857', accent: '#059669' },
 } as const;
 
@@ -290,7 +290,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
 
   return (
     <div 
-      className="bg-white overflow-hidden flex flex-col transition-all duration-300"
+      className="bg-white overflow-hidden flex flex-col"
       style={{ ...panelStyles, border: `1px solid ${theme.borderColor}40`, boxShadow: isDragging ? `0 0 0 3px ${theme.accent}, 0 12px 40px rgba(0,0,0,0.5)` : `0 8px 32px rgba(0,0,0,0.35), 0 0 0 1px ${theme.borderColor}30` }}
       onClick={onFocus}
     >

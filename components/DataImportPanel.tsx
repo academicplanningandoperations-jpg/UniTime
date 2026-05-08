@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2, AlertTriangle, RotateCcw, Shield } from 'lucide-react';
+import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2, AlertTriangle, RotateCcw, Shield, Search, X } from 'lucide-react';
 import { Course, Faculty, Room, StudentGroup, ScheduleEntry } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -480,12 +480,90 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     }
   };
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
   const allData: any[] = activeTab === 'Modules' ? courses : activeTab === 'Faculties' ? faculties : activeTab === 'Rooms' ? rooms : activeTab === 'Cohorts' ? cohorts : [];
   const currentData = activeTab === 'Schedule' ? [] : getTermData(allData);
+
+  const filteredData = useMemo(() => {
+    if (!searchQuery.trim()) return currentData;
+    const q = searchQuery.toLowerCase();
+    return currentData.filter((item: any) => {
+      if (activeTab === 'Modules') {
+        return (item._unique_name || item.code || '').toLowerCase().includes(q)
+          || (item._name || item.name || '').toLowerCase().includes(q)
+          || (item._academic_year || item.academicYear || '').toString().includes(q)
+          || (item.Semester || `SEM-${item.semester || 1}`).toLowerCase().includes(q)
+          || (item.department || '').toLowerCase().includes(q);
+      }
+      if (activeTab === 'Faculties') {
+        return (item._Faculty_ID || item.facultyId || '').toLowerCase().includes(q)
+          || (item._Faculty_name || item.name || '').toLowerCase().includes(q)
+          || (item._deptName || item.department || '').toLowerCase().includes(q)
+          || (item._email || item.email || '').toLowerCase().includes(q);
+      }
+      if (activeTab === 'Rooms') {
+        return (item._unique_name || item.name || '').toLowerCase().includes(q)
+          || (item._name || item.name || '').toLowerCase().includes(q)
+          || (item._custom1 || '').toLowerCase().includes(q)
+          || (item._custom2 || '').toLowerCase().includes(q);
+      }
+      if (activeTab === 'Cohorts') {
+        return (item._unique_name || item.name || '').toLowerCase().includes(q)
+          || (item._name || item.name || '').toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [currentData, searchQuery, activeTab]);
+
+  const allFilteredSelected = filteredData.length > 0 && filteredData.every((item: any) => selectedIds.has(item.id));
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      const next = new Set(selectedIds);
+      filteredData.forEach((item: any) => next.delete(item.id));
+      setSelectedIds(next);
+    } else {
+      const next = new Set(selectedIds);
+      filteredData.forEach((item: any) => next.add(item.id));
+      setSelectedIds(next);
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const deleteSelected = () => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`Delete ${selectedIds.size} selected record(s)? This cannot be undone.`)) return;
+    const ids = selectedIds;
+    if (activeTab === 'Modules') onUploadCourses(courses.filter(c => !ids.has(c.id)));
+    if (activeTab === 'Faculties') onUploadFaculties(faculties.filter(f => !ids.has(f.id)));
+    if (activeTab === 'Rooms') onUploadRooms(rooms.filter(r => !ids.has(r.id)));
+    if (activeTab === 'Cohorts') onUploadCohorts(cohorts.filter(g => !ids.has(g.id)));
+    setSelectedIds(new Set());
+  };
+
+  const checkboxTh = (
+    <th className="px-3 py-2 w-8">
+      <input
+        type="checkbox"
+        checked={allFilteredSelected}
+        onChange={toggleSelectAll}
+        className="w-3.5 h-3.5 accent-[#185baf] cursor-pointer"
+        title="Select all visible"
+      />
+    </th>
+  );
 
   const renderTableHeaders = () => {
     if (activeTab === 'Modules') return (
       <tr>
+        {checkboxTh}
         <th className="px-3 py-2 text-[11px] font-bold text-[#185baf] uppercase">Module ID (Unique)</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_name</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_academic_year</th>
@@ -495,6 +573,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     );
     if (activeTab === 'Faculties') return (
       <tr>
+        {checkboxTh}
         <th className="px-3 py-2 text-[11px] font-bold text-[#185baf] uppercase">Faculty ID</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_Faculty_name</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_deptName</th>
@@ -504,6 +583,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     );
     if (activeTab === 'Rooms') return (
       <tr>
+        {checkboxTh}
         <th className="px-3 py-2 text-[11px] font-bold text-[#185baf] uppercase">Room ID (Unique)</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_name</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_custom1</th>
@@ -513,6 +593,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     );
     return (
       <tr>
+        {checkboxTh}
         <th className="px-3 py-2 text-[11px] font-bold text-[#185baf] uppercase">Cohort ID (Unique)</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_name</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase text-right">Actions</th>
@@ -521,8 +602,17 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
   };
 
   const renderTableRows = () => {
-    return currentData.map((item: any) => (
-      <tr key={item.id} className="hover:bg-[#f5f5f5] transition-colors divide-x divide-[#eee] text-xs text-[#333]">
+    return filteredData.map((item: any) => (
+      <tr key={item.id}
+        className={`transition-colors divide-x divide-[#eee] text-xs text-[#333] ${selectedIds.has(item.id) ? 'bg-[#eaf2ff]' : 'hover:bg-[#f5f5f5]'}`}>
+        <td className="px-3 py-2 w-8">
+          <input
+            type="checkbox"
+            checked={selectedIds.has(item.id)}
+            onChange={() => toggleSelect(item.id)}
+            className="w-3.5 h-3.5 accent-[#185baf] cursor-pointer"
+          />
+        </td>
         {activeTab === 'Modules' && (<>
           <td className="px-3 py-2 font-bold text-[#185baf]">{item._unique_name || item.code || item.id}</td>
           <td className="px-3 py-2">{item._name || item.name}</td>
@@ -546,7 +636,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
           <td className="px-3 py-2">{item._name || item.name}</td>
         </>)}
         <td className="px-3 py-2 text-right">
-          <button onClick={() => deleteItem(activeTab, item.id)}
+          <button onClick={() => deleteItem(activeTab as ImportType, item.id)}
             className="p-1.5 text-[#ac2925] hover:bg-[#ebd5d5] border border-transparent hover:border-[#ac2925] transition-all"
             title="Delete Record">
             <Trash2 className="w-3.5 h-3.5" />
@@ -686,7 +776,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
 
       <div className="flex bg-[#f0f6ff] border-b-2 border-[#c8ddf8] w-full shadow-sm">
         {(['Modules', 'Faculties', 'Rooms', 'Cohorts', 'Schedule'] as AllTabType[]).map(t => (
-          <button key={t} onClick={() => { setActiveTab(t); setRestorePreview(null); }}
+          <button key={t} onClick={() => { setActiveTab(t); setRestorePreview(null); setSearchQuery(''); setSelectedIds(new Set()); }}
             className={`flex items-center gap-2 px-6 py-2.5 text-sm font-bold transition-all border-r border-[#c8ddf8] ${
               activeTab === t
                 ? 'bg-white text-[#185baf] border-t-2 border-t-[#185baf]'
@@ -830,20 +920,51 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pb-12 items-start mt-2">
         <div className="lg:col-span-8 space-y-4">
           <div className="bg-white border border-[#c8ddf8] shadow-sm">
-            <div className="p-3 border-b border-[#c8ddf8] bg-[#f0f6ff] flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-[#185baf]" />
-                <h3 className="text-sm font-bold text-[#333] uppercase tracking-wide">
-                  Active {activeTab} Registry
-                  <span className="ml-2 text-[#666] font-medium text-xs">({currentData.length})</span>
-                </h3>
+            <div className="p-3 border-b border-[#c8ddf8] bg-[#f0f6ff] flex flex-col gap-2">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-[#185baf]" />
+                  <h3 className="text-sm font-bold text-[#333] uppercase tracking-wide">
+                    Active {activeTab} Registry
+                    <span className="ml-2 text-[#666] font-medium text-xs">
+                      ({filteredData.length}{filteredData.length !== currentData.length ? ` of ${currentData.length}` : ''})
+                    </span>
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedIds.size > 0 && (
+                    <button
+                      onClick={deleteSelected}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ac2925] text-white text-xs font-bold uppercase tracking-wide hover:bg-[#8a1f1c] transition-colors border border-[#8a1f1c]">
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete {selectedIds.size} Selected
+                    </button>
+                  )}
+                  <button onClick={() => { setActiveImportType(activeTab as ImportType); fileInputRef.current?.click(); }}
+                    disabled={!activeTermId}
+                    className="btn-primary flex items-center gap-2 py-1.5 px-4 text-xs shadow-sm hover:shadow disabled:opacity-40 disabled:cursor-not-allowed">
+                    <Upload className="w-3.5 h-3.5" />
+                    Bulk Import
+                  </button>
+                </div>
               </div>
-              <button onClick={() => { setActiveImportType(activeTab as ImportType); fileInputRef.current?.click(); }}
-                disabled={!activeTermId}
-                className="btn-primary flex items-center gap-2 py-1.5 px-4 text-xs shadow-sm hover:shadow disabled:opacity-40 disabled:cursor-not-allowed">
-                <Upload className="w-3.5 h-3.5" />
-                Bulk Import
-              </button>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#888] pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => { setSearchQuery(e.target.value); setSelectedIds(new Set()); }}
+                  placeholder={`Search ${activeTab.toLowerCase()}…`}
+                  className="w-full pl-8 pr-8 py-1.5 text-xs border border-[#c8ddf8] bg-white outline-none focus:border-[#185baf] text-[#333] placeholder-[#aaa]"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => { setSearchQuery(''); setSelectedIds(new Set()); }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[#999] hover:text-[#333]">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="overflow-x-auto">
               <div className="max-h-[500px] overflow-y-auto">

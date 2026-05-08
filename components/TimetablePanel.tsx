@@ -6,6 +6,13 @@ import { Minus, Square, X, FolderSync, CalendarCheck, AlertTriangle, Search, Che
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatTime12h } from '../services/utils';
 
+const TYPE_THEMES = {
+  Room:    { headerGrad: 'linear-gradient(135deg, #0e7490 0%, #0891b2 100%)', borderColor: '#0891b2', entryColor: '#0891b2', entryBorder: '#0e7490', accent: '#0891b2' },
+  Faculty: { headerGrad: 'linear-gradient(135deg, #92400e 0%, #b45309 100%)', borderColor: '#b45309', entryColor: '#b45309', entryBorder: '#92400e', accent: '#b45309' },
+  Group:   { headerGrad: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)', borderColor: '#7c3aed', entryColor: '#7c3aed', entryBorder: '#5b21b6', accent: '#7c3aed' },
+  Course:  { headerGrad: 'linear-gradient(135deg, #047857 0%, #059669 100%)', borderColor: '#059669', entryColor: '#059669', entryBorder: '#047857', accent: '#059669' },
+} as const;
+
 const getDayDate = (dayIndex: number, week: number) => {
   const startDate = new Date('2024-09-02');
   const daysToAdd = (week - 1) * 7 + dayIndex;
@@ -54,6 +61,8 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
   onMoveEntry, onDuplicateEntry, onDeleteEntry, onPasteEntry, onCopyToPanel, onCtrlDragCopy,
   clipboard, setClipboard, isMaximized = false, onMaximize, isMobile = false, activeTermId
 }) => {
+  const theme = TYPE_THEMES[viewType as keyof typeof TYPE_THEMES] ?? TYPE_THEMES.Group;
+
   const [isDragging, setIsDragging] = useState(false);
   const [resizeDir, setResizeDir] = useState<string | null>(null);
   const [selectedWeeks, setSelectedWeeks] = useState<number[]>(Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1));
@@ -281,15 +290,16 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
 
   return (
     <div 
-      className={`bg-white shadow-sm overflow-hidden border border-[#ccc] flex flex-col transition-shadow duration-300 ${isDragging ? 'ring-2 ring-[#185baf]' : ''}`} 
-      style={panelStyles} 
+      className="bg-white overflow-hidden flex flex-col transition-all duration-300"
+      style={{ ...panelStyles, border: `1px solid ${theme.borderColor}40`, boxShadow: isDragging ? `0 0 0 3px ${theme.accent}, 0 12px 40px rgba(0,0,0,0.5)` : `0 8px 32px rgba(0,0,0,0.35), 0 0 0 1px ${theme.borderColor}30` }}
       onClick={onFocus}
     >
       {/* Classic Title Bar */}
       <div 
         onMouseDown={handleMouseDown} 
         onDoubleClick={(e) => { e.stopPropagation(); onMaximize?.(); }}
-        className={`px-3 py-1.5 flex items-center justify-between cursor-move active:cursor-grabbing border-b border-[#ccc] bg-[#185baf] text-white ${isMobile ? 'cursor-default' : ''}`}
+        className={`px-3 py-1.5 flex items-center justify-between cursor-move active:cursor-grabbing border-b text-white ${isMobile ? 'cursor-default' : ''}`}
+        style={{ background: theme.headerGrad, borderColor: `${theme.accent}60` }}
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <Calendar className="text-white w-4 h-4 shrink-0" />
@@ -435,7 +445,8 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
         <div className="flex items-center gap-2 shrink-0">
           <button 
             onClick={() => setSelectedWeeks(Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1))} 
-            className={`px-3 py-1 text-[11px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 border ${selectedWeeks.length === TOTAL_WEEKS ? 'bg-[#185baf] text-white border-[#185baf]' : 'bg-white text-[#333] border-[#ccc] hover:bg-[#e6e6e6]'}`}
+            className={`px-3 py-1 text-[11px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 border ${selectedWeeks.length === TOTAL_WEEKS ? 'text-white border-transparent' : 'bg-white text-[#333] border-[#ccc] hover:bg-[#e6e6e6]'}`}
+            style={selectedWeeks.length === TOTAL_WEEKS ? { background: theme.accent } : undefined}
           >
             <CalendarCheck className="w-3 h-3" />
             All Weeks
@@ -455,7 +466,8 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                   setSelectedWeeks([week]); 
                 } 
               }} 
-              className={`min-w-[24px] h-6 border text-[11px] font-bold transition-all flex items-center justify-center ${selectedWeeks.includes(week) ? 'bg-[#185baf] text-white border-[#185baf]' : 'bg-white text-[#333] border-[#ccc] hover:bg-[#e6e6e6]'}`}
+              className={`min-w-[24px] h-6 border text-[11px] font-bold transition-all flex items-center justify-center ${selectedWeeks.includes(week) ? 'text-white border-transparent' : 'bg-white text-[#333] border-[#ccc] hover:bg-[#e6e6e6]'}`}
+              style={selectedWeeks.includes(week) ? { background: theme.accent } : undefined}
             >
               {week}
             </button>
@@ -469,11 +481,11 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
           {/* viewId '' = nothing selected yet (shows placeholder); comma-separated IDs = multi-select */}
           {!viewId ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-white z-[100] p-12 text-center">
-               <div className="w-20 h-20 bg-[#f8fafc] rounded-none flex items-center justify-center mb-6 border-4 border-double border-[#185baf]/20 shadow-inner">
-                  <Search className="w-10 h-10 text-[#185baf]/40" />
+               <div className="w-20 h-20 bg-[#f8fafc] rounded-none flex items-center justify-center mb-6 border-4 border-double shadow-inner" style={{ borderColor: `${theme.accent}30` }}>
+                  <Search className="w-10 h-10" style={{ color: `${theme.accent}50` }} />
                </div>
-               <h3 className="text-lg font-black text-[#185baf] uppercase tracking-[0.2em]">Ready to Build</h3>
-               <div className="w-12 h-1 bg-[#185baf] my-4" />
+               <h3 className="text-lg font-black uppercase tracking-[0.2em]" style={{ color: theme.accent }}>Ready to Build</h3>
+               <div className="w-12 h-1 my-4" style={{ background: theme.accent }} />
                <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest max-w-[250px] leading-relaxed">
                  Select a {viewType} from the dropdown menu in the blue title bar above to start scheduling.
                </p>
@@ -519,7 +531,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                             className="absolute top-0.5 right-0.5 z-50 opacity-0 group-hover/cell:opacity-100 transition-opacity"
                             onClick={(e) => { e.stopPropagation(); onCellClick?.(day as DayOfWeek, time, viewType, selectedIds.length === 1 ? selectedIds[0] : ''); }}
                           >
-                            <Plus className="w-3.5 h-3.5 text-[#185baf] bg-white rounded-full shadow-md border border-[#185baf] p-0.5" />
+                            <Plus className="w-3.5 h-3.5 bg-white rounded-full shadow-md border p-0.5" style={{ color: theme.accent, borderColor: theme.accent }} />
                           </div>
                         )}
                         <div className={`absolute inset-y-[1px] left-[1px] z-10 pointer-events-none`} style={{ width: 'calc(100% - 2px)', height: 'calc(100% - 2px)' }}>
@@ -541,8 +553,8 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                 style={{ 
                                   top: `${cascadeY}px`,
                                   left: `${cascadeX}px`,
-                                  backgroundColor: hasConflict ? '#ef4444' : '#185baf', 
-                                  borderColor: hasConflict ? '#b91c1c' : '#00479b', 
+                                  backgroundColor: hasConflict ? '#ef4444' : theme.entryColor,
+                                  borderColor: hasConflict ? '#b91c1c' : theme.entryBorder,
                                   color: '#fff',
                                   width: slots > 1 ? `calc(${slots * 100}% + ${(slots - 1) * 2}px - ${cascadeX}px)` : `calc(100% - ${cascadeX}px)`,
                                   height: `calc(100% - ${cascadeY}px)`,
@@ -623,7 +635,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
              <span>WEEKS: <strong>{selectedWeeks.length}</strong></span>
            </div>
         </div>
-        <div className="flex items-center gap-1 font-bold text-[#185baf]">
+        <div className="flex items-center gap-1 font-bold" style={{ color: theme.accent }}>
           <Zap className="w-3 h-3" />
           {activeObjectName}
         </div>
@@ -653,11 +665,8 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.1 }}
-            className="fixed bg-[#f0f0f0] border border-[#185baf] shadow-lg z-[10000] py-1 min-w-[140px]"
-            style={{ 
-              left: contextMenu.x, 
-              top: contextMenu.y,
-            }}
+            className="fixed bg-[#f0f0f0] border shadow-lg z-[10000] py-1 min-w-[140px]"
+            style={{ left: contextMenu.x, top: contextMenu.y, borderColor: theme.accent }}
             onClick={(e) => e.stopPropagation()}
           >
             {contextMenu.entry ? (

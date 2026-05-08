@@ -253,6 +253,18 @@ const App: React.FC = () => {
     activeTermIdRef.current = effectiveActiveTerm?.id;
   }, [effectiveActiveTerm?.id]);
 
+  // Canvas cursor-glow: update CSS variables so the radial gradient follows the mouse.
+  // Uses CSS vars on documentElement so background-attachment:fixed can use viewport coords.
+  useEffect(() => {
+    if (activeTab !== 'builder') return;
+    const handler = (e: MouseEvent) => {
+      document.documentElement.style.setProperty('--canvas-mx', `${e.clientX}px`);
+      document.documentElement.style.setProperty('--canvas-my', `${e.clientY}px`);
+    };
+    window.addEventListener('mousemove', handler);
+    return () => window.removeEventListener('mousemove', handler);
+  }, [activeTab]);
+
   // Safety-net: reload all data every 30 seconds and on window focus.
   // CRITICAL: Skips refresh if a write just happened (write guard) to prevent
   // a read-before-commit from wiping freshly uploaded data.
@@ -978,9 +990,9 @@ const App: React.FC = () => {
         <div className="h-full w-full overflow-auto custom-scrollbar">
           {activeTab === 'dashboard' && <Dashboard courses={courses} rooms={rooms} groups={groups} schedule={schedule} clashes={clashes} activeTerm={effectiveActiveTerm} faculties={faculties} />}
           {activeTab === 'builder' && (
-            <div className="flex flex-col h-full bg-slate-200/30">
-              <div className="flex-1 relative overflow-auto shadow-inner custom-scrollbar">
-                <div className="min-w-[2500px] min-h-[1500px] relative">
+            <div className="flex flex-col h-full">
+              <div className="flex-1 relative overflow-auto custom-scrollbar">
+                <div className="min-w-[2500px] min-h-[1500px] relative canvas-workspace">
                   <AnimatePresence>
                     {panels.map((panel) => (
                       <TimetablePanel 

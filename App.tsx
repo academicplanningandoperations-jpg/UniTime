@@ -113,6 +113,7 @@ const App: React.FC = () => {
   // When two saves fire before React re-renders, the second sees the old `schedule = []`
   // and setSchedule([entryB]) silently drops entryA. Using the ref gives always-current value.
   const scheduleRef = useRef<ScheduleEntry[]>([]);
+  const glowRef = useRef<HTMLDivElement>(null);
 
   // Update both state and ref in one call — use this everywhere instead of bare setSchedule.
   const setScheduleAndRef = (s: ScheduleEntry[]) => {
@@ -253,16 +254,21 @@ const App: React.FC = () => {
     activeTermIdRef.current = effectiveActiveTerm?.id;
   }, [effectiveActiveTerm?.id]);
 
-  // Canvas cursor-glow: update CSS variables so the radial gradient follows the mouse.
-  // Uses CSS vars on documentElement so background-attachment:fixed can use viewport coords.
+  // Canvas cursor-glow: translate a pre-rendered radial gradient div to follow the cursor.
+  // Uses transform (GPU compositor) not background repaint — zero layout/paint cost.
   useEffect(() => {
     if (activeTab !== 'builder') return;
+    let rafId = 0;
     const handler = (e: MouseEvent) => {
-      document.documentElement.style.setProperty('--canvas-mx', `${e.clientX}px`);
-      document.documentElement.style.setProperty('--canvas-my', `${e.clientY}px`);
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (glowRef.current) {
+          glowRef.current.style.transform = `translate(${e.clientX - 450}px, ${e.clientY - 450}px)`;
+        }
+      });
     };
     window.addEventListener('mousemove', handler);
-    return () => window.removeEventListener('mousemove', handler);
+    return () => { window.removeEventListener('mousemove', handler); cancelAnimationFrame(rafId); };
   }, [activeTab]);
 
   // Safety-net: reload all data every 30 seconds and on window focus.
@@ -991,6 +997,8 @@ const App: React.FC = () => {
           {activeTab === 'dashboard' && <Dashboard courses={courses} rooms={rooms} groups={groups} schedule={schedule} clashes={clashes} activeTerm={effectiveActiveTerm} faculties={faculties} />}
           {activeTab === 'builder' && (
             <div className="flex flex-col h-full">
+              {/* GPU-composited glow — only transforms, never repaints */}
+              <div ref={glowRef} className="fixed pointer-events-none" style={{ width: 900, height: 900, top: 0, left: 0, zIndex: 1, background: 'radial-gradient(circle at center, rgba(99,162,255,0.14) 0%, transparent 70%)', willChange: 'transform' }} />
               <div className="flex-1 relative overflow-auto custom-scrollbar">
                 <div className="min-w-[2500px] min-h-[1500px] relative canvas-workspace">
                   <AnimatePresence>

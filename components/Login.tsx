@@ -100,9 +100,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-3 py-2 text-[11px] font-bold outline-none text-white placeholder:text-white/30 transition-all"
-                  style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(99,162,255,0.25)' }}
-                  onFocus={e => (e.target.style.borderColor = 'rgba(99,162,255,0.6)')}
-                  onBlur={e => (e.target.style.borderColor = 'rgba(99,162,255,0.25)')}
+                  style={{ background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(99,162,255,0.45)' }}
+                  onFocus={e => (e.target.style.borderColor = 'rgba(99,162,255,0.85)')}
+                  onBlur={e => (e.target.style.borderColor = 'rgba(99,162,255,0.45)')}
                   autoFocus
                   required
                 />
@@ -117,9 +117,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-3 py-2 text-[11px] font-bold outline-none text-white placeholder:text-white/30 transition-all"
-                  style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(99,162,255,0.25)' }}
-                  onFocus={e => (e.target.style.borderColor = 'rgba(99,162,255,0.6)')}
-                  onBlur={e => (e.target.style.borderColor = 'rgba(99,162,255,0.25)')}
+                  style={{ background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(99,162,255,0.45)' }}
+                  onFocus={e => (e.target.style.borderColor = 'rgba(99,162,255,0.85)')}
+                  onBlur={e => (e.target.style.borderColor = 'rgba(99,162,255,0.45)')}
                   required
                 />
               </div>

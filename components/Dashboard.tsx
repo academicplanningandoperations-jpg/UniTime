@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { MapPin, AlertTriangle, Clock, BookOpen, Database, Calendar } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { MapPin, AlertTriangle, Clock, BookOpen, Database, Calendar, Filter, X } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, Tooltip, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer, LabelList, Cell
@@ -21,38 +21,73 @@ const SCHOOL_COLORS = ['#185baf', '#0891b2', '#059669', '#d97706', '#7c3aed', '#
 
 const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule, clashes, activeTerm, faculties }) => {
 
+  const [selectedSchool, setSelectedSchool] = useState<string | null>(null);
+
+  // Reset slicer when active term changes
+  useEffect(() => { setSelectedSchool(null); }, [activeTerm?.id]);
+
+  // Term-filtered schedule (base)
   const effectiveSchedule = useMemo(() => {
     return activeTerm ? schedule.filter(s => s.termId === activeTerm.id) : schedule;
   }, [schedule, activeTerm]);
 
+  // All schools that appear in the effective schedule
+  const allSchools = useMemo(() => {
+    if (!faculties) return [];
+    const set = new Set<string>();
+    effectiveSchedule.forEach(s => {
+      const f = faculties.find(f => f.id === s.facultyId);
+      const dept = (f as any)?._deptName || f?.department;
+      if (dept) set.add(dept);
+    });
+    return Array.from(set).sort();
+  }, [effectiveSchedule, faculties]);
+
+  // School-sliced schedule (what everything else reacts to)
+  const slicedSchedule = useMemo(() => {
+    if (!selectedSchool) return effectiveSchedule;
+    return effectiveSchedule.filter(s => {
+      const f = faculties?.find(f => f.id === s.facultyId);
+      const dept = (f as any)?._deptName || f?.department || 'General';
+      return dept === selectedSchool;
+    });
+  }, [effectiveSchedule, selectedSchool, faculties]);
+
+  // Derived ID sets for filtered stat counts
+  const slicedCourseIds = useMemo(() => new Set(slicedSchedule.map(s => s.courseId)), [slicedSchedule]);
+  const slicedRoomIds   = useMemo(() => new Set(slicedSchedule.map(s => s.roomId)),   [slicedSchedule]);
+  const slicedFacultyIds = useMemo(() => new Set(slicedSchedule.map(s => s.facultyId)), [slicedSchedule]);
+
   const totalHours = useMemo(() => {
-    return effectiveSchedule.reduce((acc, curr) => acc + DataService.getDuration(curr.startTime, curr.endTime), 0);
-  }, [effectiveSchedule]);
+    return slicedSchedule.reduce((acc, curr) => acc + DataService.getDuration(curr.startTime, curr.endTime), 0);
+  }, [slicedSchedule]);
 
   const dailyData = useMemo(() => {
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const days   = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     return days.map((day, i) => {
-      const daySessions = effectiveSchedule.filter(s => s.day === day);
+      const daySessions = slicedSchedule.filter(s => s.day === day);
       return {
         name: labels[i],
         sessions: daySessions.length,
         hours: Math.round(daySessions.reduce((a, c) => a + DataService.getDuration(c.startTime, c.endTime), 0)),
       };
     });
-  }, [effectiveSchedule]);
+  }, [slicedSchedule]);
 
+  // School chart always shows ALL schools (for comparison); dims non-selected
   const schoolData = useMemo(() => {
     if (!faculties) return [];
     const deptMap = new Map<string, number>();
     effectiveSchedule.forEach(s => {
-      const faculty = faculties.find(f => f.id === s.facultyId);
-      const dept = (faculty as any)?._deptName || faculty?.department || 'General';
+      const f = faculties.find(f => f.id === s.facultyId);
+      const dept = (f as any)?._deptName || f?.department || 'General';
       deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
     });
     return Array.from(deptMap.entries())
-      .map(([name, sessions]) => ({
-        name: name.length > 24 ? name.slice(0, 22) + '…' : name,
+      .map(([fullName, sessions]) => ({
+        fullName,
+        name: fullName.length > 24 ? fullName.slice(0, 22) + '…' : fullName,
         sessions,
       }))
       .sort((a, b) => b.sessions - a.sessions)
@@ -62,30 +97,41 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
   const facultyData = useMemo(() => {
     if (!faculties) return [];
     return faculties.map(f => {
-      const load = effectiveSchedule
+      const load = slicedSchedule
         .filter(s => s.facultyId === f.id)
         .reduce((acc, curr) => acc + DataService.getDuration(curr.startTime, curr.endTime), 0);
       return { name: f.name.split(' ').pop() as string, fullName: f.name, load: Math.round(load) };
     }).filter(f => f.load > 0).sort((a, b) => b.load - a.load).slice(0, 5);
-  }, [faculties, effectiveSchedule]);
+  }, [faculties, slicedSchedule]);
 
   const statCards = [
-    { icon: BookOpen, title: 'COURSES', value: courses.length, sub: 'Modules', color: '#6366f1', grad: 'linear-gradient(135deg, #4338ca, #6366f1)', bg: '#eef2ff' },
-    { icon: MapPin, title: 'ROOMS', value: rooms.length, sub: 'Venues', color: '#0891b2', grad: 'linear-gradient(135deg, #0e7490, #06b6d4)', bg: '#ecfeff' },
-    { icon: Calendar, title: 'ENTRIES', value: effectiveSchedule.length, sub: 'Timetable', color: '#059669', grad: 'linear-gradient(135deg, #047857, #10b981)', bg: '#ecfdf5' },
-    { icon: Clock, title: 'LOAD', value: `${Math.round(totalHours)}h`, sub: 'Weekly', color: '#d97706', grad: 'linear-gradient(135deg, #b45309, #f59e0b)', bg: '#fffbeb' },
-    { icon: AlertTriangle, title: 'CLASHES', value: clashes.length, sub: 'Conflicts', color: '#e11d48', grad: 'linear-gradient(135deg, #be123c, #e11d48)', bg: '#fff1f2' },
+    { icon: BookOpen, title: 'COURSES',  value: selectedSchool ? slicedCourseIds.size : courses.length,    sub: 'Modules',   color: '#6366f1', grad: 'linear-gradient(135deg,#4338ca,#6366f1)', bg: '#eef2ff' },
+    { icon: MapPin,   title: 'ROOMS',    value: selectedSchool ? slicedRoomIds.size   : rooms.length,      sub: 'Venues',    color: '#0891b2', grad: 'linear-gradient(135deg,#0e7490,#06b6d4)', bg: '#ecfeff' },
+    { icon: Calendar, title: 'ENTRIES',  value: slicedSchedule.length,                                     sub: 'Timetable', color: '#059669', grad: 'linear-gradient(135deg,#047857,#10b981)', bg: '#ecfdf5' },
+    { icon: Clock,    title: 'LOAD',     value: `${Math.round(totalHours)}h`,                              sub: 'Weekly',    color: '#d97706', grad: 'linear-gradient(135deg,#b45309,#f59e0b)', bg: '#fffbeb' },
+    { icon: AlertTriangle, title: 'CLASHES', value: clashes.length,                                        sub: 'Conflicts', color: '#e11d48', grad: 'linear-gradient(135deg,#be123c,#e11d48)', bg: '#fff1f2' },
+  ];
+
+  const resourceRows = [
+    { label: 'Schedule Entries', value: slicedSchedule.length,                                            badge: 'Optimal', bc: '#2e7d32', bb: '#eafbef', bbr: '#a5d6a7' },
+    { label: 'Active Courses',   value: selectedSchool ? slicedCourseIds.size : courses.length,           badge: 'Loaded',  bc: '#185baf', bb: '#e8f2fc', bbr: '#b2d1f7' },
+    { label: 'Faculty Count',    value: selectedSchool ? slicedFacultyIds.size : (faculties?.length ?? 0), badge: 'Synced',  bc: '#7c3aed', bb: '#f5f3ff', bbr: '#c4b5fd' },
+    { label: 'Rooms Active',     value: selectedSchool ? slicedRoomIds.size   : rooms.length,             badge: 'Ready',   bc: '#0891b2', bb: '#ecfeff', bbr: '#a5f3fc' },
   ];
 
   return (
     <div className="p-4 max-w-[1400px] mx-auto min-h-screen font-sans">
 
+      {/* Header */}
       <header className="p-4 mb-4 text-white flex justify-between items-center"
         style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 40%, #185baf 100%)' }}>
         <div>
           <h2 className="text-[18px] font-black tracking-wide uppercase">System Overview</h2>
           <p className="text-[11px] font-bold text-blue-200 uppercase tracking-wide mt-0.5">
             Active Term: <span className="text-white">{activeTerm?.name || 'All Terms'}</span>
+            {selectedSchool && (
+              <span className="ml-3 text-yellow-300">— {selectedSchool}</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -98,6 +144,46 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
           </button>
         </div>
       </header>
+
+      {/* School Slicer */}
+      {allSchools.length > 0 && (
+        <div className="mb-4 bg-[#f8faff] border border-[#d0e4f8] p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Filter className="w-3.5 h-3.5 text-[#5a7ba8]" />
+            <span className="text-[10px] font-bold text-[#5a7ba8] uppercase tracking-widest">Filter by School</span>
+            {selectedSchool && (
+              <button
+                onClick={() => setSelectedSchool(null)}
+                className="ml-auto flex items-center gap-1 text-[9px] font-bold text-[#e11d48] uppercase tracking-wide hover:underline">
+                <X className="w-3 h-3" /> Clear Filter
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+            <button
+              onClick={() => setSelectedSchool(null)}
+              className={`shrink-0 px-3 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full border transition-all ${
+                !selectedSchool
+                  ? 'bg-[#185baf] text-white border-[#185baf] shadow'
+                  : 'bg-white text-[#555] border-[#ccc] hover:border-[#185baf] hover:text-[#185baf]'
+              }`}>
+              All Schools
+            </button>
+            {allSchools.map(school => (
+              <button
+                key={school}
+                onClick={() => setSelectedSchool(s => s === school ? null : school)}
+                className={`shrink-0 px-3 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full border transition-all whitespace-nowrap ${
+                  selectedSchool === school
+                    ? 'bg-[#185baf] text-white border-[#185baf] shadow'
+                    : 'bg-white text-[#555] border-[#ccc] hover:border-[#185baf] hover:text-[#185baf]'
+                }`}>
+                {school}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stat Boxes */}
       <div className="flex flex-wrap gap-2 mb-4">
@@ -120,13 +206,16 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
 
-        {/* Left column: daily + school charts */}
+        {/* Left column */}
         <div className="lg:col-span-2 flex flex-col gap-3">
 
           {/* Sessions Per Day */}
           <div className="bg-white border border-[#ccc] p-3 flex flex-col">
             <div className="flex justify-between items-center mb-3 border-b border-[#eee] pb-2">
-              <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">Sessions Per Day</h4>
+              <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">
+                Sessions Per Day
+                {selectedSchool && <span className="ml-2 text-[#185baf] normal-case font-medium text-[11px]">— {selectedSchool}</span>}
+              </h4>
               <div className="flex items-center gap-1.5">
                 <div className="w-2 h-2 bg-[#185baf]" />
                 <span className="text-[10px] font-bold text-[#555]">SESSION COUNT</span>
@@ -134,7 +223,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
             </div>
             <div className="h-[220px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={dailyData} margin={{ top: 20, right: 20, left: -20, bottom: 0 }}>
+                <LineChart data={dailyData} margin={{ top: 22, right: 20, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
                   <XAxis dataKey="name" axisLine={{ stroke: '#999' }} tickLine={false} tick={{ fontSize: 11, fill: '#666' }} dy={10} />
                   <YAxis axisLine={{ stroke: '#999' }} tickLine={false} tick={{ fontSize: 11, fill: '#666' }} />
@@ -153,13 +242,15 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
             </div>
           </div>
 
-          {/* School-wise Sessions */}
+          {/* School-wise Sessions — always shows all schools, highlights selected */}
           <div className="bg-white border border-[#ccc] p-3 flex flex-col">
             <div className="flex justify-between items-center mb-3 border-b border-[#eee] pb-2">
               <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">School-wise Sessions</h4>
-              <span className="text-[10px] font-bold text-[#888] uppercase">By Department</span>
+              <span className="text-[10px] font-bold text-[#888] uppercase">
+                {selectedSchool ? `Highlighted: ${selectedSchool}` : 'All Departments'}
+              </span>
             </div>
-            <div className="h-[240px] w-full">
+            <div className="h-[260px] w-full">
               {schoolData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={schoolData} layout="vertical" margin={{ top: 0, right: 55, left: 8, bottom: 0 }}>
@@ -173,8 +264,12 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
                       formatter={(v: any) => [v, 'Sessions']}
                     />
                     <Bar dataKey="sessions" barSize={16} radius={[0, 4, 4, 0]}>
-                      {schoolData.map((_, i) => (
-                        <Cell key={i} fill={SCHOOL_COLORS[i % SCHOOL_COLORS.length]} />
+                      {schoolData.map((entry, i) => (
+                        <Cell
+                          key={i}
+                          fill={SCHOOL_COLORS[i % SCHOOL_COLORS.length]}
+                          fillOpacity={!selectedSchool || entry.fullName === selectedSchool ? 1 : 0.2}
+                        />
                       ))}
                       <LabelList dataKey="sessions" position="right"
                         style={{ fontSize: 10, fontWeight: 'bold', fill: '#333' }} />
@@ -197,22 +292,19 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
           <div className="bg-[#f8f9fa] border border-[#ccc] p-3">
             <div className="flex items-center gap-2 mb-3 border-b border-[#ddd] pb-2">
               <Database className="w-4 h-4 text-[#555]" />
-              <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">System Resources</h4>
+              <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">
+                {selectedSchool ? 'School Snapshot' : 'System Resources'}
+              </h4>
             </div>
             <div className="space-y-2">
-              {[
-                { label: 'Schedule Entries', value: effectiveSchedule.length, badge: 'Optimal', badgeColor: '#2e7d32', badgeBg: '#eafbef', badgeBorder: '#a5d6a7' },
-                { label: 'Active Courses', value: courses.length, badge: 'Loaded', badgeColor: '#185baf', badgeBg: '#e8f2fc', badgeBorder: '#b2d1f7' },
-                { label: 'Faculty Count', value: faculties?.length ?? 0, badge: 'Synced', badgeColor: '#7c3aed', badgeBg: '#f5f3ff', badgeBorder: '#c4b5fd' },
-                { label: 'Rooms Active', value: rooms.length, badge: 'Ready', badgeColor: '#0891b2', badgeBg: '#ecfeff', badgeBorder: '#a5f3fc' },
-              ].map(item => (
+              {resourceRows.map(item => (
                 <div key={item.label} className="bg-white border border-[#ccc] p-2.5 flex justify-between items-center">
                   <div>
                     <div className="text-[10px] font-bold text-[#666] tracking-wider uppercase">{item.label}</div>
                     <div className="text-[16px] font-bold text-[#333] leading-tight">{item.value}</div>
                   </div>
                   <span className="text-[9px] font-bold border px-1.5 py-0.5 uppercase"
-                    style={{ color: item.badgeColor, background: item.badgeBg, borderColor: item.badgeBorder }}>
+                    style={{ color: item.bc, background: item.bb, borderColor: item.bbr }}>
                     {item.badge}
                   </span>
                 </div>
@@ -224,11 +316,12 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
           <div className="bg-[#f8f9fa] border border-[#ccc] p-3 flex-1 flex flex-col">
             <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase mb-3 border-b border-[#ddd] pb-2">
               Top Faculty Workloads
+              {selectedSchool && <span className="ml-1 text-[#185baf] normal-case font-medium text-[10px]">({selectedSchool})</span>}
             </h4>
             <div className="flex-1 w-full min-h-[160px]">
               {facultyData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={facultyData} layout="vertical" margin={{ top: 0, right: 40, left: -20, bottom: 0 }}>
+                  <BarChart data={facultyData} layout="vertical" margin={{ top: 0, right: 45, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} vertical={true} stroke="#eee" />
                     <XAxis type="number" axisLine={{ stroke: '#ccc' }} tickLine={false} tick={{ fontSize: 9, fill: '#888' }} />
                     <YAxis dataKey="name" type="category" axisLine={false} tickLine={false}
@@ -236,10 +329,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
                     <Tooltip
                       cursor={{ fill: '#f0f0f0' }}
                       contentStyle={{ fontSize: '10px', fontWeight: 'bold', padding: '4px 8px' }}
-                      formatter={(v: any, _: any, props: any) => [
-                        `${v}h — ${props?.payload?.fullName || ''}`,
-                        'Load'
-                      ]}
+                      formatter={(v: any, _: any, props: any) => [`${v}h — ${props?.payload?.fullName || ''}`, 'Load']}
                     />
                     <Bar dataKey="load" fill="#185baf" barSize={14} radius={[0, 4, 4, 0]}>
                       <LabelList dataKey="load" position="right"
@@ -250,7 +340,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
                 </ResponsiveContainer>
               ) : (
                 <div className="h-full flex items-center justify-center text-[10px] font-bold text-[#999] uppercase tracking-wider">
-                  No load data available.
+                  {selectedSchool ? `No sessions for ${selectedSchool}.` : 'No load data available.'}
                 </div>
               )}
             </div>

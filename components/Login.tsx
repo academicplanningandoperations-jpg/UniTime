@@ -137,14 +137,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
 
         <div className="p-6 flex flex-col gap-5">
           {/* Brand block */}
-          <div className="flex gap-4 items-center bg-[#f0f6ff] border border-[#c8ddf8] p-4">
-            <div className="w-12 h-12 flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg, #185baf, #0891b2)' }}>
-              <Logo className="w-8 h-8 text-white" variant="grid" />
-            </div>
-            <div>
-              <h1 className="text-[20px] font-black text-[#185baf] leading-tight uppercase tracking-widest">UniTime</h1>
-              <p className="text-[10px] font-bold text-[#6b91c0] uppercase tracking-widest mt-0.5">University Scheduling Platform</p>
-            </div>
+          <div className="flex flex-col gap-2 items-center justify-center bg-[#f0f6ff] border border-[#c8ddf8] p-4 text-center">
+            <Logo className="w-32 h-auto mix-blend-multiply" />
+            <p className="text-[10px] font-bold text-[#6b91c0] uppercase tracking-widest mt-0.5">University Scheduling Platform</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">

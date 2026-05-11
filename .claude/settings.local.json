@@ -1,6 +1,29 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(node -e \"require\\('./node_modules/xlsx'\\); console.log\\('xlsx ok'\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npm run *)",
+      "Bash(git commit *)",
+      "Bash(git remote *)",
+      "Bash(gh repo *)",
+      "Bash(gh auth *)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" status)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" log --oneline -5)",
+      "Bash(git -C 'd:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)' commit -m ' *)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" push origin main)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" add components/Dashboard.tsx)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" add components/Login.tsx index.css)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" add App.tsx)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" add components/RoomAvailabilityTool.tsx)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "supabase"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

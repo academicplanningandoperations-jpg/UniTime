@@ -4,11 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UniTime - University Timetable Management</title>
+    <link rel="icon" type="image/png" href="/logo.png">
+    <link rel="apple-touch-icon" href="/pwa-icon.png">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/index.css">
     <link rel="manifest" href="/manifest.json">
 </head>
 <body class="bg-[#0f172a] text-slate-900">
+    <!-- Splash Screen -->
+    <div id="splash-screen" class="fixed inset-0 z-[20000] flex flex-col items-center justify-center bg-[#f0f6ff] transition-opacity duration-500">
+      <img src="/logo.png" alt="UniTime Logo" class="w-48 h-auto animate-pulse mix-blend-multiply" />
+    </div>
+
     <!-- Fail-safe Recovery Button (only visible if React fails to load) -->
     <div id="recovery-portal" class="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-[#0f172a]" style="display: none;">
       <div class="max-w-md w-full bg-[#1e293b] border-2 border-blue-500 p-8 shadow-2xl text-center">
@@ -59,6 +66,13 @@
         const root = document.getElementById('root');
         if (root && root.hasChildNodes()) {
           document.getElementById('recovery-portal').style.display = 'none';
+          
+          const splash = document.getElementById('splash-screen');
+          if (splash) {
+            splash.style.opacity = '0';
+            setTimeout(() => splash.style.display = 'none', 500);
+          }
+
           clearTimeout(recoveryTimer);
           observer.disconnect();
         }

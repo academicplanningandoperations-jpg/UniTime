@@ -888,15 +888,22 @@ const App: React.FC = () => {
         return;
       }
 
+      // Sort by day then start time — same order as Full Institutional Timetable in Reports
+      const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const sorted = [...termSchedule].sort((a, b) => {
+        const d = DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day);
+        return d !== 0 ? d : a.startTime.localeCompare(b.startTime);
+      });
+
       const rows: any[] = [];
-      termSchedule.forEach(s => {
+      sorted.forEach((s, index) => {
         const course = courses.find(c => c.id === s.courseId);
         const faculty = faculties.find(f => f.id === s.facultyId);
         const room = rooms.find(r => r.id === s.roomId);
         const sessionGroups = groups.filter(g => s.groupIds?.includes(g.id));
 
         const baseRow = {
-          '_event_id': s.id,
+          '_event_id': index + 1,
           '_day_of_week': s.day,
           '_start_time': s.startTime,
           '_end_time': s.endTime,
@@ -905,7 +912,7 @@ const App: React.FC = () => {
           'Module Unique ID': (course as any)?._unique_name || course?.code || '',
           'Module': (course as any)?._name || course?.name || '',
           'Room': (room as any)?._unique_name || room?.name || '',
-          'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.facultyId || faculty?.id || '',
+          'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
           'Faculty_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
         };
 
@@ -920,8 +927,8 @@ const App: React.FC = () => {
 
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Timetable');
-      XLSX.writeFile(wb, `unitime-schedule-${new Date().toISOString().split('T')[0]}.xlsx`);
+      XLSX.utils.book_append_sheet(wb, ws, 'Full Timetable');
+      XLSX.writeFile(wb, `Full_University_Timetable_${new Date().toISOString().split('T')[0]}.xlsx`);
     } catch (error) {
       console.error('Excel Export failed:', error);
       alert('Failed to generate export file.');

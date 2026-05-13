@@ -145,12 +145,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
       <div className="flex flex-col md:flex-row items-center justify-between w-full max-w-[1200px] px-4 md:px-8 z-10 relative gap-12">
         
         {/* Dynamic Text Section (Left) */}
-        <div className="flex-1 text-white max-w-[500px] text-center md:text-left pt-10 md:pt-0">
+        <div className="flex-1 text-white max-w-[600px] text-center md:text-left pt-10 md:pt-0">
           <div className="mb-4 hidden md:block">
             <Logo className="w-16 h-16 text-white opacity-90" variant="grid" />
           </div>
           <h2 
-            className={`text-3xl md:text-5xl font-black leading-tight tracking-wide uppercase transition-opacity duration-500 ease-in-out ${fade ? 'opacity-100' : 'opacity-0'}`}
+            className={`text-4xl md:text-6xl font-black leading-tight tracking-wide uppercase transition-opacity duration-500 ease-in-out ${fade ? 'opacity-100' : 'opacity-0'}`}
             style={{
               textShadow: '0 4px 20px rgba(0,0,0,0.5), 0 0 40px rgba(24,91,175,0.4)',
               background: 'linear-gradient(135deg, #ffffff 0%, #c8ddf8 100%)',
@@ -248,6 +248,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
                 </button>
               </div>
             </form>
+
+            <div className="text-center pt-2 border-t border-[#c8ddf8]/50 mt-2">
+              <p className="text-[10px] font-medium text-[#5a7ba8]">
+                Forgot your ID or password? <br/>
+                <a href="#" className="text-[#185baf] font-bold hover:underline">Contact Administration</a>
+              </p>
+            </div>
           </div>
 
           <div className="px-4 py-2 bg-[#f0f6ff] border-t border-[#c8ddf8] flex items-center gap-2">

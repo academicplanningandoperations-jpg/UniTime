@@ -421,7 +421,8 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     </span>
                     <button
                       onClick={() => { setIsSelectorOpen(false); setSearchQuery(''); }}
-                      className="px-4 py-1 text-[10px] font-bold bg-[#185baf] text-white border border-[#0d3b76] hover:bg-[#124584] transition-colors uppercase tracking-widest"
+                      className="px-4 py-1 text-[10px] font-bold text-white uppercase tracking-widest transition-opacity hover:opacity-90"
+                      style={{ background: theme.headerGrad, border: `1px solid ${theme.entryBorder}` }}
                     >
                       Done
                     </button>

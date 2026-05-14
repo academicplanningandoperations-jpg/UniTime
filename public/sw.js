@@ -1,7 +1,8 @@
-const CACHE_NAME = 'unitime-v4'; // Incrementing to force update
+const CACHE_NAME = 'unitime-v5';
 const STATIC_ASSETS = [
   '/',
-  '/pwa-icon.png',
+  '/mascot-512.png',
+  '/mascot.svg',
   '/manifest.json'
 ];
 

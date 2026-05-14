@@ -73,7 +73,7 @@ const TopNav: React.FC<TopNavProps> = ({
     <header className="h-[34px] flex items-center justify-between px-2 text-white shrink-0 font-sans z-[1000]" style={{ background: 'linear-gradient(180deg, #1e6ad4 0%, #185baf 60%, #124a99 100%)', borderBottom: '1px solid #0a2d6e', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
       <div className="flex items-center h-full">
         <div className="flex items-center gap-2 px-2 mr-2 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-          <Logo className="w-5 h-5 rounded-full bg-white" />
+          <Logo className="w-6 h-6" />
           <span className="font-bold text-[13px] tracking-wide">UniTime</span>
         </div>
         

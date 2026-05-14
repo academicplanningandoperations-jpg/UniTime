@@ -2,13 +2,13 @@ import React from 'react';
 
 interface LogoProps {
   className?: string;
-  variant?: 'grid' | 'ut';
+  full?: boolean;
 }
 
-export const Logo: React.FC<LogoProps> = ({ className = "w-8 h-8" }) => {
+export const Logo: React.FC<LogoProps> = ({ className = "w-8 h-8", full = false }) => {
   return (
     <img
-      src="/logo.png"
+      src={full ? "/logo-full.svg" : "/mascot.svg"}
       alt="UniTime Logo"
       className={`${className} object-contain`}
     />

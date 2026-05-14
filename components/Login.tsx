@@ -183,9 +183,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
 
           <div className="p-6 flex flex-col gap-5">
             {/* Brand block */}
-            <div className="flex flex-col gap-2 items-center justify-center bg-[#f0f6ff] border border-[#c8ddf8] p-4 text-center">
-              <Logo className="w-48 h-auto" full />
-              <p className="text-[10px] font-bold text-[#6b91c0] uppercase tracking-widest mt-0.5">University Scheduling Platform</p>
+            <div className="flex flex-col gap-1 items-center justify-center py-2 text-center">
+              <Logo className="w-64 h-auto" full />
+              <p className="text-[10px] font-bold text-[#6b91c0] uppercase tracking-widest">University Scheduling Platform</p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">

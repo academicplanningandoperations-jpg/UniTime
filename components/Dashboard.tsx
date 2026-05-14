@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { MapPin, AlertTriangle, Clock, BookOpen, Database, Calendar, Filter, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, Tooltip, XAxis, YAxis, CartesianGrid,
-  ResponsiveContainer, LabelList, Cell, Legend
+  ResponsiveContainer, LabelList, Cell
 } from 'recharts';
 import { Course, Room, StudentGroup, ScheduleEntry, Clash, Term, Faculty } from '../types';
 import { DataService } from '../services/dataService';
@@ -320,48 +320,43 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
             </div>
           </div>
 
-          {/* Faculty Load by Weekday — school-synced */}
+          {/* Sessions by Weekday — school-synced */}
           <div className="bg-white border border-[#ccc] p-3 flex flex-col">
-              <div className="flex justify-between items-center mb-3 border-b border-[#eee] pb-2">
-                <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">
-                  Sessions by Weekday
-                  {selectedSchool && <span className="ml-2 text-[#185baf] normal-case font-medium text-[11px]">— {selectedSchool}</span>}
-                </h4>
-                <span className="text-[10px] font-bold text-[#888] uppercase">
-                  {selectedSchool ? 'School Breakdown' : `Top ${Math.min(allSchools.length, 6)} Schools`}
-                </span>
-              </div>
-              <div className="h-[220px] w-full">
-                {schoolDayData.some(d => d._total > 0) ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={schoolDayData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                      <XAxis dataKey="name" axisLine={{ stroke: '#999' }} tickLine={false} tick={{ fontSize: 11, fill: '#666' }} dy={6} />
-                      <YAxis axisLine={{ stroke: '#999' }} tickLine={false} tick={{ fontSize: 10, fill: '#888' }} />
-                      <Tooltip
-                        contentStyle={{ fontSize: '11px', fontWeight: 'bold', padding: '6px 10px' }}
-                        formatter={(v: any, name: string) => [v, name]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase', paddingTop: 4 }} />
-                      {(selectedSchool ? [selectedSchool] : allSchools.slice(0, 6)).map((school, i) => (
-                        <Bar key={school} dataKey={school} stackId="a" fill={SCHOOL_COLORS[i % SCHOOL_COLORS.length]} barSize={28}>
-                          {i === (selectedSchool ? 0 : Math.min(allSchools.length, 6) - 1) && (
-                            <LabelList dataKey="_total" position="top"
-                              content={({ x, y, width, value }: any) =>
-                                value > 0 ? <text x={x + width / 2} y={y - 4} fill="#555" fontSize={9} fontWeight="bold" textAnchor="middle">{value}</text> : null
-                              }
-                            />
-                          )}
-                        </Bar>
+            <div className="flex justify-between items-center mb-3 border-b border-[#eee] pb-2">
+              <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">
+                Sessions by Weekday
+                {selectedSchool && <span className="ml-2 text-[#185baf] normal-case font-medium text-[11px]">— {selectedSchool}</span>}
+              </h4>
+              <span className="text-[10px] font-bold text-[#888] uppercase">
+                {selectedSchool ? 'School View' : 'All Schools Combined'}
+              </span>
+            </div>
+            <div className="h-[200px] w-full">
+              {schoolDayData.some(d => d._total > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={schoolDayData} margin={{ top: 20, right: 20, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                    <XAxis dataKey="name" axisLine={{ stroke: '#999' }} tickLine={false} tick={{ fontSize: 11, fill: '#666' }} dy={6} />
+                    <YAxis axisLine={{ stroke: '#999' }} tickLine={false} tick={{ fontSize: 10, fill: '#888' }} />
+                    <Tooltip
+                      contentStyle={{ fontSize: '11px', fontWeight: 'bold', padding: '6px 10px' }}
+                      formatter={(v: any) => [v, 'Sessions']}
+                    />
+                    <Bar dataKey="_total" barSize={32} radius={[3, 3, 0, 0]}>
+                      {schoolDayData.map((entry, i) => (
+                        <Cell key={i} fill={SCHOOL_COLORS[i % SCHOOL_COLORS.length]} />
                       ))}
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-[10px] font-bold text-[#999] uppercase tracking-wider">
-                    No session data for selected filters.
-                  </div>
-                )}
-              </div>
+                      <LabelList dataKey="_total" position="top"
+                        style={{ fontSize: 10, fontWeight: 'bold', fill: '#555' }}
+                        formatter={(v: number) => v > 0 ? v : ''} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-[10px] font-bold text-[#999] uppercase tracking-wider">
+                  No session data for selected filters.
+                </div>
+              )}
             </div>
           </div>
         </div>

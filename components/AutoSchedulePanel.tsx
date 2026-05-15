@@ -177,36 +177,47 @@ const AutoSchedulePanel: React.FC<Props> = ({
   const pct = progress;
   const isReady = assignments.length > 0 && stage !== 'running';
 
+  const StepHeader = ({ n, label }: { n: string; label: string }) => (
+    <div className="flex items-center gap-2.5 mb-3 pb-2.5 border-b border-[#f1f5f9]">
+      <div className="w-5 h-5 flex items-center justify-center text-[10px] font-black text-white shrink-0"
+        style={{ background: 'linear-gradient(135deg, #185baf, #0891b2)' }}>{n}</div>
+      <span className="text-[11px] font-black text-[#0f172a] uppercase tracking-wide">{label}</span>
+    </div>
+  );
+
   return (
-    <div className="h-full overflow-y-auto bg-[#f0f4f8] p-4 space-y-4 custom-scrollbar">
+    <div className="h-full overflow-y-auto bg-[#f0f4f8] custom-scrollbar">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-[13px] font-black text-[#0f2747] uppercase tracking-widest flex items-center gap-2">
-            <Zap className="w-4 h-4 text-[#185baf]" /> Auto Timetable Generator
-          </h2>
-          <p className="text-[10px] text-[#666] mt-0.5">
-            Upload assignment data → configure constraints → generate a clash-free timetable
-          </p>
+      <div className="mb-4 overflow-hidden relative" style={{ background: 'linear-gradient(135deg, #0c1b3a 0%, #0f2d5e 35%, #185baf 70%, #1a7fd4 100%)' }}>
+        <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />
+        <div className="absolute right-0 top-0 bottom-0 w-32 opacity-[0.04]" style={{ backgroundImage: 'repeating-linear-gradient(-45deg, white 0px, white 1px, transparent 1px, transparent 12px)' }} />
+        <div className="relative px-5 py-4 flex justify-between items-center">
+          <div>
+            <h2 className="text-[17px] font-black text-white tracking-tight flex items-center gap-2">
+              <Zap className="w-4 h-4 text-yellow-300" /> Auto Timetable Generator
+            </h2>
+            <p className="text-[11px] text-blue-200 font-medium mt-0.5">
+              Upload assignments → configure constraints → generate a clash-free timetable
+            </p>
+          </div>
+          {activeTerm && (
+            <div className="bg-white/10 border border-white/20 px-3 py-1.5">
+              <p className="text-[9px] font-bold text-blue-200 uppercase tracking-widest">Active Term</p>
+              <p className="text-[12px] font-black text-white">{activeTerm.name}</p>
+            </div>
+          )}
         </div>
-        {activeTerm && (
-          <span className="text-[10px] font-bold text-white bg-[#185baf] px-2 py-1 uppercase tracking-widest">
-            {activeTerm.name}
-          </span>
-        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="px-4 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
 
         {/* ── LEFT COLUMN ─────────────────────────────────────────────────── */}
         <div className="space-y-3">
 
           {/* Step 1 — Download templates */}
-          <div className="bg-white border border-[#ddd] p-3 space-y-2">
-            <p className="text-[10px] font-black text-[#185baf] uppercase tracking-widest border-b border-[#eee] pb-1.5">
-              Step 1 — Download Templates
-            </p>
+          <div className="bg-white border border-[#e2e8f0] shadow-sm p-4 space-y-3">
+            <StepHeader n="1" label="Download Templates" />
             <div className="flex gap-2">
               <button
                 onClick={() => downloadCSV('course_assignment_template.csv', COURSE_TEMPLATE_CSV)}
@@ -230,10 +241,8 @@ const AutoSchedulePanel: React.FC<Props> = ({
           </div>
 
           {/* Step 2 — Upload files */}
-          <div className="bg-white border border-[#ddd] p-3 space-y-3">
-            <p className="text-[10px] font-black text-[#185baf] uppercase tracking-widest border-b border-[#eee] pb-1.5">
-              Step 2 — Upload Files
-            </p>
+          <div className="bg-white border border-[#e2e8f0] shadow-sm p-4 space-y-3">
+            <StepHeader n="2" label="Upload Files" />
 
             {/* Course file */}
             <div className="space-y-1">
@@ -305,13 +314,8 @@ const AutoSchedulePanel: React.FC<Props> = ({
           </div>
 
           {/* Step 3 — Defaults */}
-          <div className="bg-white border border-[#ddd] p-3 space-y-3">
-            <p className="text-[10px] font-black text-[#185baf] uppercase tracking-widest border-b border-[#eee] pb-1.5">
-              Step 3 — Default Constraints
-              <span className="ml-1 text-[#888] font-normal normal-case tracking-normal">
-                (used when template column is blank)
-              </span>
-            </p>
+          <div className="bg-white border border-[#e2e8f0] shadow-sm p-4 space-y-3">
+            <StepHeader n="3" label="Default Constraints" />
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -362,30 +366,31 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
           {/* Progress */}
           {(stage === 'running' || stage === 'done') && (
-            <div className="bg-white border border-[#ddd] p-4 space-y-3">
-              <p className="text-[10px] font-black text-[#185baf] uppercase tracking-widest border-b border-[#eee] pb-1.5">
-                {stage === 'running' ? 'Generating…' : 'Generation Complete'}
-              </p>
+            <div className="bg-white border border-[#e2e8f0] shadow-sm p-4 space-y-4">
+              <div className="flex items-center gap-2 pb-2.5 border-b border-[#f1f5f9]">
+                <div className={`w-2 h-2 rounded-full ${stage === 'running' ? 'animate-pulse bg-[#185baf]' : 'bg-[#059669]'}`} />
+                <p className="text-[11px] font-black text-[#0f172a] uppercase tracking-wide">
+                  {stage === 'running' ? 'Generating…' : 'Generation Complete'}
+                </p>
+              </div>
 
               {/* Progress bar */}
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-[#555] truncate max-w-[70%]">{label}</span>
-                  <span className="text-[11px] font-black text-[#185baf]">{pct}%</span>
+                  <span className="text-[10px] font-medium text-[#64748b] truncate max-w-[70%]">{label}</span>
+                  <span className="text-[14px] font-black" style={{ color: pct === 100 ? '#059669' : '#185baf' }}>{pct}%</span>
                 </div>
-                <div className="h-3 bg-[#e8eef7] border border-[#c5d8f0] overflow-hidden">
+                <div className="h-2.5 bg-[#f1f5f9] overflow-hidden">
                   <div
-                    className="h-full transition-all duration-200"
+                    className="h-full transition-all duration-300"
                     style={{
                       width: `${pct}%`,
-                      background: pct === 100
-                        ? 'linear-gradient(90deg,#2e7d32,#43a047)'
-                        : 'linear-gradient(90deg,#185baf,#0891b2)',
+                      background: pct === 100 ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#185baf,#0891b2)',
                     }}
                   />
                 </div>
                 {result && (
-                  <p className="text-[9px] text-[#666]">
+                  <p className="text-[9px] text-[#94a3b8] font-bold">
                     {result.entries.length} of {result.stats.totalSessions} sessions placed
                   </p>
                 )}
@@ -394,24 +399,24 @@ const AutoSchedulePanel: React.FC<Props> = ({
               {/* Stats */}
               {result && (
                 <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-[#f0f9f0] border border-[#b8ddb8] p-2 text-center">
-                    <CheckCircle className="w-4 h-4 text-[#2e7d32] mx-auto mb-1" />
-                    <p className="text-[18px] font-black text-[#2e7d32]">{result.stats.placed}</p>
-                    <p className="text-[9px] font-bold text-[#2e7d32] uppercase tracking-widest">Placed</p>
+                  <div className="border p-3 text-center" style={{ background: '#ecfdf5', borderColor: '#a7f3d0' }}>
+                    <CheckCircle className="w-4 h-4 text-[#059669] mx-auto mb-1" />
+                    <p className="text-[22px] font-black text-[#059669] leading-none">{result.stats.placed}</p>
+                    <p className="text-[9px] font-bold text-[#059669] uppercase tracking-widest mt-0.5">Placed</p>
                   </div>
-                  <div className={`border p-2 text-center ${result.stats.unresolvedCount > 0 ? 'bg-[#fff8e1] border-[#ffe082]' : 'bg-[#f0f9f0] border-[#b8ddb8]'}`}>
-                    <AlertTriangle className={`w-4 h-4 mx-auto mb-1 ${result.stats.unresolvedCount > 0 ? 'text-[#f57f17]' : 'text-[#2e7d32]'}`} />
-                    <p className={`text-[18px] font-black ${result.stats.unresolvedCount > 0 ? 'text-[#f57f17]' : 'text-[#2e7d32]'}`}>
+                  <div className="border p-3 text-center" style={{ background: result.stats.unresolvedCount > 0 ? '#fffbeb' : '#ecfdf5', borderColor: result.stats.unresolvedCount > 0 ? '#fde68a' : '#a7f3d0' }}>
+                    <AlertTriangle className={`w-4 h-4 mx-auto mb-1 ${result.stats.unresolvedCount > 0 ? 'text-[#d97706]' : 'text-[#059669]'}`} />
+                    <p className={`text-[22px] font-black leading-none ${result.stats.unresolvedCount > 0 ? 'text-[#d97706]' : 'text-[#059669]'}`}>
                       {result.stats.unresolvedCount}
                     </p>
-                    <p className={`text-[9px] font-bold uppercase tracking-widest ${result.stats.unresolvedCount > 0 ? 'text-[#f57f17]' : 'text-[#2e7d32]'}`}>
+                    <p className={`text-[9px] font-bold uppercase tracking-widest mt-0.5 ${result.stats.unresolvedCount > 0 ? 'text-[#d97706]' : 'text-[#059669]'}`}>
                       Unresolved
                     </p>
                   </div>
-                  <div className="bg-[#f0f4ff] border border-[#c5cef7] p-2 text-center">
+                  <div className="border border-[#bfdbfe] bg-[#eff6ff] p-3 text-center">
                     <Zap className="w-4 h-4 text-[#185baf] mx-auto mb-1" />
-                    <p className="text-[18px] font-black text-[#185baf]">{result.stats.totalSessions}</p>
-                    <p className="text-[9px] font-bold text-[#185baf] uppercase tracking-widest">Total</p>
+                    <p className="text-[22px] font-black text-[#185baf] leading-none">{result.stats.totalSessions}</p>
+                    <p className="text-[9px] font-bold text-[#185baf] uppercase tracking-widest mt-0.5">Total</p>
                   </div>
                 </div>
               )}
@@ -421,7 +426,8 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 <button
                   onClick={handleApply}
                   disabled={applying}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-black uppercase tracking-widest bg-[#2e7d32] text-white border border-[#1b5e20] hover:bg-[#256427] transition-colors disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-black uppercase tracking-widest text-white shadow-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}
                 >
                   <CheckCircle className="w-4 h-4" />
                   {applying ? 'Applying…' : `Apply ${result.entries.length} Sessions to Timetable`}
@@ -484,22 +490,22 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
           {/* Idle hint */}
           {stage === 'idle' && (
-            <div className="bg-white border border-[#ddd] p-6 text-center space-y-2">
-              <Zap className="w-8 h-8 text-[#c5cfe0] mx-auto" />
-              <p className="text-[11px] font-bold text-[#999] uppercase tracking-widest">
-                Results appear here
-              </p>
-              <p className="text-[10px] text-[#bbb]">
-                Upload a course template and click Generate
-              </p>
+            <div className="bg-white border border-[#e2e8f0] shadow-sm p-8 text-center space-y-3">
+              <div className="w-14 h-14 mx-auto flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #eff6ff, #e0f2fe)' }}>
+                <Zap className="w-7 h-7 text-[#93c5fd]" />
+              </div>
+              <div>
+                <p className="text-[12px] font-black text-[#94a3b8] uppercase tracking-widest">Results appear here</p>
+                <p className="text-[10px] text-[#cbd5e1] mt-1">Upload a course template and click Generate</p>
+              </div>
             </div>
           )}
 
           {/* Column format reference */}
-          <div className="bg-white border border-[#ddd] p-3 space-y-2">
-            <p className="text-[10px] font-black text-[#555] uppercase tracking-widest border-b border-[#eee] pb-1.5">
-              Course Template Columns
-            </p>
+          <div className="bg-white border border-[#e2e8f0] shadow-sm p-4 space-y-3">
+            <div className="flex items-center gap-2 pb-2.5 border-b border-[#f1f5f9]">
+              <span className="text-[11px] font-black text-[#0f172a] uppercase tracking-wide">Template Column Reference</span>
+            </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
               {[
                 ['FacultyID', 'e.g. 600001'],

@@ -362,62 +362,64 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
   );
 
   return (
-    <div className="space-y-4 p-2">
-      {/* Header with gradient */}
-      <div className="mx-2 p-4 text-white" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 40%, #185baf 100%)' }}>
-        <div className="flex justify-between items-center">
+    <div className="space-y-0 flex flex-col h-full">
+      {/* Header */}
+      <div className="mx-2 mt-2 mb-3 overflow-hidden relative" style={{ background: 'linear-gradient(135deg, #0c1b3a 0%, #0f2d5e 35%, #185baf 70%, #1a7fd4 100%)' }}>
+        <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />
+        <div className="absolute right-0 top-0 bottom-0 w-32 opacity-[0.04]" style={{ backgroundImage: 'repeating-linear-gradient(-45deg, white 0px, white 1px, transparent 1px, transparent 12px)' }} />
+        <div className="relative px-5 py-4 flex justify-between items-center">
           <div>
-            <h2 className="text-[18px] font-black uppercase tracking-wide">Reports & Analytics</h2>
-            <p className="text-[10px] text-blue-200 font-bold uppercase tracking-widest mt-0.5">
+            <h2 className="text-[17px] font-black text-white tracking-tight">Reports & Analytics</h2>
+            <p className="text-[10px] text-blue-200 font-medium mt-0.5">
               {activeTermId ? terms.find(t => t.id === activeTermId)?.name : 'All Terms'}
-              {' · '}{activeSchedule.length} scheduled sessions · {clashes.length} conflicts detected
+              {' · '}{activeSchedule.length} sessions · {clashes.length} conflicts
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[9px] font-bold uppercase tracking-widest text-blue-200">Live Data</span>
+          <div className="flex items-center gap-2 bg-white/10 border border-white/20 px-3 py-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-300">Live</span>
           </div>
         </div>
       </div>
 
       {/* Tab switcher */}
-      <div className="flex mx-2 bg-[#f0f6ff] border-b-2 border-[#c8ddf8]">
+      <div className="flex mx-2 bg-white border border-[#e2e8f0] shadow-sm mb-3">
         <button
           onClick={() => setActiveReportTab('reports')}
-          className={`flex items-center gap-2 px-5 py-2 text-[12px] font-bold border-b-2 transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 text-[11px] font-black uppercase tracking-wide border-b-[3px] transition-all ${
             activeReportTab === 'reports'
-              ? 'border-[#185baf] text-[#185baf] bg-white'
-              : 'border-transparent text-[#5a7ba8] hover:text-[#185baf] hover:bg-[#e4effc]'
+              ? 'border-[#185baf] text-[#185baf] bg-[#eff6ff]'
+              : 'border-transparent text-[#64748b] hover:text-[#185baf] hover:bg-[#f8fafc]'
           }`}
         >
           <FileText className="w-3.5 h-3.5" /> Reports
         </button>
         <button
           onClick={() => setActiveReportTab('entries')}
-          className={`flex items-center gap-2 px-5 py-2 text-[12px] font-bold border-b-2 transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 text-[11px] font-black uppercase tracking-wide border-b-[3px] transition-all ${
             activeReportTab === 'entries'
-              ? 'border-[#185baf] text-[#185baf] bg-white'
-              : 'border-transparent text-[#5a7ba8] hover:text-[#185baf] hover:bg-[#e4effc]'
+              ? 'border-[#185baf] text-[#185baf] bg-[#eff6ff]'
+              : 'border-transparent text-[#64748b] hover:text-[#185baf] hover:bg-[#f8fafc]'
           }`}
         >
           <List className="w-3.5 h-3.5" />
           Schedule Entries
-          <span className="ml-1 bg-[#185baf] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-sm">
+          <span className={`ml-1 text-[9px] font-black px-1.5 py-0.5 ${activeReportTab === 'entries' ? 'bg-[#185baf] text-white' : 'bg-[#e2e8f0] text-[#64748b]'}`}>
             {activeSchedule.length}
           </span>
         </button>
         <button
           onClick={() => setActiveReportTab('clashes')}
-          className={`flex items-center gap-2 px-5 py-2 text-[12px] font-bold border-b-2 transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 text-[11px] font-black uppercase tracking-wide border-b-[3px] transition-all ${
             activeReportTab === 'clashes'
-              ? 'border-[#ac2925] text-[#ac2925] bg-white'
-              : 'border-transparent text-[#5a7ba8] hover:text-[#ac2925] hover:bg-[#fef0ef]'
+              ? 'border-[#e11d48] text-[#e11d48] bg-[#fff1f2]'
+              : 'border-transparent text-[#64748b] hover:text-[#e11d48] hover:bg-[#fff8f9]'
           }`}
         >
           <ShieldAlert className="w-3.5 h-3.5" />
           Clashes
           {clashes.length > 0 && (
-            <span className="ml-1 bg-[#ac2925] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-sm">
+            <span className={`ml-1 text-[9px] font-black px-1.5 py-0.5 ${activeReportTab === 'clashes' ? 'bg-[#e11d48] text-white' : 'bg-[#fecdd3] text-[#e11d48]'}`}>
               {clashes.length}
             </span>
           )}
@@ -448,25 +450,20 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
             {reportCards.map((report) => (
               <div
                 key={report.id}
-                className="bg-white border shadow-sm flex flex-col justify-between hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
-                style={{ borderColor: report.accentBorder }}
+                className="bg-white border border-[#e2e8f0] shadow-sm flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-200 overflow-hidden"
               >
-                <div className="p-4 flex-1" style={{ background: `linear-gradient(180deg, ${report.accentBg} 0%, white 100%)` }}>
-                  <div className="flex items-center gap-3 pb-3 mb-3" style={{ borderBottom: `2px solid ${report.accentBorder}` }}>
-                    <div className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-md" style={{ background: report.accentGrad }}>
-                      {report.icon}
-                    </div>
-                    <div>
-                      <h3 className="text-[12px] font-black uppercase tracking-wide" style={{ color: report.accentColor }}>{report.title}</h3>
-                      <p className="text-[9px] text-[#888] font-bold uppercase tracking-widest mt-0.5">Institutional Report</p>
-                    </div>
+                <div className="p-5 flex-1">
+                  <div className="w-12 h-12 flex items-center justify-center text-white shrink-0 shadow-md mb-4" style={{ background: report.accentGrad }}>
+                    {report.icon}
                   </div>
-                  <p className="text-[11px] text-[#555] font-medium leading-relaxed">{report.description}</p>
+                  <h3 className="text-[13px] font-black text-[#0f172a] mb-1">{report.title}</h3>
+                  <p className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: report.accentColor }}>Institutional Report</p>
+                  <p className="text-[11px] text-[#64748b] leading-relaxed">{report.description}</p>
                 </div>
-                <div className="p-2" style={{ background: report.accentBg, borderTop: `1px solid ${report.accentBorder}` }}>
+                <div className="px-5 pb-5">
                   <button
                     onClick={report.action}
-                    className="w-full py-1.5 text-[11px] font-bold uppercase tracking-widest text-white flex items-center justify-center gap-2 shadow-sm hover:opacity-90 transition-opacity"
+                    className="w-full py-2 text-[11px] font-black uppercase tracking-widest text-white flex items-center justify-center gap-2 shadow-sm hover:opacity-90 transition-opacity"
                     style={{ background: report.accentGrad }}
                   >
                     <Download className="w-3.5 h-3.5" />

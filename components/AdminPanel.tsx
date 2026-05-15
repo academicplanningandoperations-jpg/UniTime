@@ -213,10 +213,12 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
   return (
     <div className="p-2 h-full flex flex-col pt-3">
       {/* Page Header */}
-      <div className="flex justify-between items-end border-b-2 border-[#185baf] pb-2 mx-2 mb-4">
-        <div>
-          <h2 className="text-[16px] font-black text-[#185baf] uppercase tracking-wide">Administrative Control Area</h2>
-          <p className="text-[10px] text-[#5a7ba8] font-bold uppercase tracking-widest">Manage Personnel Access & Backend Infrastructure</p>
+      <div className="mx-2 mb-4 overflow-hidden relative" style={{ background: 'linear-gradient(135deg, #0c1b3a 0%, #0f2d5e 35%, #185baf 70%, #1a7fd4 100%)' }}>
+        <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />
+        <div className="absolute right-0 top-0 bottom-0 w-32 opacity-[0.04]" style={{ backgroundImage: 'repeating-linear-gradient(-45deg, white 0px, white 1px, transparent 1px, transparent 12px)' }} />
+        <div className="relative px-5 py-4">
+          <h2 className="text-[17px] font-black text-white tracking-tight">Team Workspace</h2>
+          <p className="text-[11px] text-blue-200 font-medium mt-0.5">Manage personnel access & backend infrastructure</p>
         </div>
       </div>
 
@@ -225,111 +227,96 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
         <div className="flex flex-col gap-4">
 
           {/* Personnel Directory Panel */}
-          <div className="bg-white border border-[#c8ddf8] shadow-sm flex flex-col">
-            <div className="text-white px-3 py-1.5 flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f3d8c, #185baf)' }}>
+          <div className="bg-white border border-[#e2e8f0] shadow-sm overflow-hidden">
+            <div className="px-4 py-3 flex justify-between items-center border-b border-[#e2e8f0]" style={{ background: 'linear-gradient(135deg, #f8fafc, #eff6ff)' }}>
               <div className="flex items-center gap-2">
-                 <Users className="w-4 h-4" />
-                 <span className="text-[11px] font-bold tracking-wide uppercase">Personnel Directory</span>
+                <Users className="w-4 h-4 text-[#185baf]" />
+                <span className="text-[12px] font-black text-[#0f172a] tracking-tight uppercase">Personnel Directory</span>
+                <span className="text-[9px] font-black bg-[#185baf] text-white px-1.5 py-0.5">{filteredUsers.length}</span>
               </div>
-              <button 
+              <button
                 onClick={() => { setIsEditing(false); setIsAdding(true); }}
-                className="bg-[#f0f0f0] text-[#185baf] px-2 py-0.5 hover:bg-white border border-[#185baf] font-bold text-[10px] uppercase tracking-widest flex items-center gap-1"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-white text-[10px] font-black uppercase tracking-widest shadow-sm hover:opacity-90 transition-opacity"
+                style={{ background: 'linear-gradient(135deg, #185baf, #0891b2)' }}
               >
                 <UserPlus className="w-3 h-3" /> Add Member
               </button>
             </div>
 
-            <div className="px-3 py-2 bg-[#f0f6ff] border-b border-[#c8ddf8]">
-               <div className="flex bg-white border border-[#ccc] p-[2px]">
-                  <div className="bg-[#f0f0f0] px-2 py-1 flex items-center justify-center border-r border-[#ccc]">
-                    <Search className="w-3 h-3 text-[#666]" />
-                  </div>
-                  <input 
-                    type="text" 
-                    placeholder="Search personnel by name, username or scope..."
-                    className="w-full px-2 py-1 text-[11px] font-bold outline-none uppercase tracking-wide"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-               </div>
+            <div className="px-4 py-2.5 border-b border-[#f1f5f9] bg-[#fafbff]">
+              <div className="flex items-center gap-2 bg-white border border-[#e2e8f0] px-2.5 py-1.5">
+                <Search className="w-3.5 h-3.5 text-[#94a3b8]" />
+                <input
+                  type="text"
+                  placeholder="Search personnel by name, username or scope..."
+                  className="w-full text-[11px] outline-none text-[#334155] placeholder:text-[#94a3b8]"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
             </div>
 
-            <div className="bg-white p-2 min-h-[250px] overflow-y-auto custom-scrollbar">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-[#ccc] bg-[#f8f9fa]">
-                    <th className="p-2 text-[10px] font-bold text-[#666] uppercase tracking-wider w-[40%]">Identity</th>
-                    <th className="p-2 text-[10px] font-bold text-[#666] uppercase tracking-wider text-center">Permissions</th>
-                    <th className="p-2 text-[10px] font-bold text-[#666] uppercase tracking-wider text-center">Operational Scope</th>
-                    <th className="p-2 text-[10px] font-bold text-[#666] uppercase tracking-wider text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.map((user) => (
-                    <tr key={user.id} className="border-b border-[#eee] hover:bg-[#f5f5f5]">
-                      <td className="p-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 border border-[#ccc] bg-[#e0e0e0] text-[#333] flex items-center justify-center font-black text-[10px]">
-                            {user.name.charAt(0)}
-                          </div>
-                          <div>
-                            <p className="text-[11px] font-black text-[#333] tracking-wide">{user.name}</p>
-                            <p className="text-[9px] font-bold text-[#666] uppercase">@{user.username}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-2 text-center">
-                        <span className={`px-2 py-0.5 border text-[9px] font-bold uppercase tracking-widest ${
-                          user.role === Role.SUPER_ADMIN ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-[#e0e0e0] text-[#333] border-[#ccc]'
-                        }`}>
-                          {user.role}
-                        </span>
-                      </td>
-                      <td className="p-2 text-center">
-                        <div className="inline-flex flex-col items-center">
-                          <span className="text-[10px] font-bold text-[#333] uppercase tracking-tight">
-                            {user.departmentScope}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="p-2 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => openEditModal(user)} className="bg-[#f0f0f0] border border-[#ccc] p-1 text-[#333] hover:bg-[#e0e0e0]" title="Edit">
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                          <button onClick={() => deleteUser(user.id)} className="bg-[#fdedec] border border-[#d9534f] p-1 text-[#d9534f] hover:bg-[#d9534f] hover:text-white" title="Delete">
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredUsers.length === 0 && (
-                     <tr>
-                        <td colSpan={4} className="p-4 text-center text-[10px] font-bold text-[#666] uppercase">NO PERSONNEL FOUND MATCHING QUERY</td>
-                     </tr>
-                  )}
-                </tbody>
-              </table>
+            <div className="min-h-[250px] overflow-y-auto custom-scrollbar divide-y divide-[#f1f5f9]">
+              {filteredUsers.map((user, idx) => {
+                const avatarColors = ['#185baf','#7c3aed','#059669','#d97706','#e11d48','#0891b2'];
+                const avatarColor = avatarColors[idx % avatarColors.length];
+                const roleBadge: Record<string, { bg: string; color: string; border: string }> = {
+                  [Role.SUPER_ADMIN]: { bg: '#eff6ff', color: '#185baf', border: '#bfdbfe' },
+                  [Role.ADMIN]:       { bg: '#f5f3ff', color: '#7c3aed', border: '#ddd6fe' },
+                  [Role.SCHEDULER]:   { bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' },
+                  [Role.VIEWER]:      { bg: '#f8fafc', color: '#64748b', border: '#e2e8f0' },
+                };
+                const badge = roleBadge[user.role] || roleBadge[Role.VIEWER];
+                return (
+                  <div key={user.id} className="flex items-center px-4 py-3 hover:bg-[#fafbff] transition-colors">
+                    <div className="w-8 h-8 flex items-center justify-center font-black text-white text-[12px] shrink-0 mr-3" style={{ background: avatarColor }}>
+                      {user.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-black text-[#0f172a] truncate">{user.name}</p>
+                      <p className="text-[9px] text-[#94a3b8] font-bold">@{user.username} · {user.departmentScope}</p>
+                    </div>
+                    <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 border mx-4 shrink-0"
+                      style={{ color: badge.color, background: badge.bg, borderColor: badge.border }}>
+                      {user.role}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => openEditModal(user)} className="p-1.5 bg-[#f8fafc] border border-[#e2e8f0] text-[#64748b] hover:bg-[#eff6ff] hover:border-[#185baf] hover:text-[#185baf] transition-colors" title="Edit">
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => deleteUser(user.id)} className="p-1.5 bg-[#fff1f2] border border-[#fecdd3] text-[#e11d48] hover:bg-[#e11d48] hover:text-white transition-colors" title="Delete">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredUsers.length === 0 && (
+                <div className="py-10 text-center">
+                  <Users className="w-8 h-8 text-[#e2e8f0] mx-auto mb-2" />
+                  <p className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest">No personnel found matching query</p>
+                </div>
+              )}
             </div>
           </div>
 
           {/* ── Schedule Management Panel ─────────────────────────────── */}
-          <div className="bg-white border border-[#c8ddf8] shadow-sm flex flex-col">
-            <div className="text-white px-3 py-1.5 flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f3d8c, #185baf)' }}>
+          <div className="bg-white border border-[#e2e8f0] shadow-sm overflow-hidden">
+            <div className="px-4 py-3 flex justify-between items-center border-b border-[#e2e8f0]" style={{ background: 'linear-gradient(135deg, #f8fafc, #eff6ff)' }}>
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
-                <span className="text-[11px] font-bold tracking-wide uppercase">Timetable Entries</span>
-                <span className="bg-white text-[#185baf] text-[9px] font-black px-1.5 py-0.5 ml-1">
-                  {schedule.filter((e: any) => e.termId === activeTermId).length} entries
-                  {activeTermName ? ` — ${activeTermName}` : ''}
+                <Calendar className="w-4 h-4 text-[#185baf]" />
+                <span className="text-[12px] font-black text-[#0f172a] uppercase tracking-tight">Timetable Entries</span>
+                <span className="text-[9px] font-black bg-[#185baf] text-white px-1.5 py-0.5">
+                  {schedule.filter((e: any) => e.termId === activeTermId).length}
+                  {activeTermName ? ` · ${activeTermName}` : ''}
                 </span>
               </div>
               <button
                 onClick={onClearSchedule}
-                className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 text-[9px] font-black uppercase tracking-widest border border-red-800 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-white text-[10px] font-black uppercase tracking-widest shadow-sm hover:opacity-90 transition-opacity border border-red-800"
+                style={{ background: 'linear-gradient(135deg, #be123c, #e11d48)' }}
               >
-                <Trash2 className="w-3 h-3" /> Clear All Entries
+                <Trash2 className="w-3 h-3" /> Clear All
               </button>
             </div>
 
@@ -386,30 +373,32 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
           </div>
 
           {/* SQL Migration Roadmap Panel */}
-          <div className="bg-white border border-[#c8ddf8] shadow-sm flex flex-col">
-             <div className="text-white px-3 py-1.5 flex items-center gap-2" style={{ background: 'linear-gradient(135deg, #0f3d8c, #185baf)' }}>
-                <Database className="w-4 h-4" />
-                <span className="text-[11px] font-bold tracking-wide uppercase">SQL Migration Roadmap</span>
-             </div>
-             <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="p-3 bg-white border border-[#ccc]">
-                   <h4 className="text-[9px] font-black uppercase text-[#666] tracking-widest mb-1 border-b border-[#eee] pb-1">Phase 1: Database</h4>
-                   <p className="text-[10px] font-bold text-[#333] leading-relaxed mb-3 mt-2">Translate LocalData to a PostgreSQL instance on <span className="text-[#185baf]">Supabase</span>.</p>
-                   <div className="inline-block bg-[#eafbef] text-[#2e7d32] border border-[#a5d6a7] px-1 text-[8px] font-black uppercase">Free Tier Ready</div>
+          <div className="bg-white border border-[#e2e8f0] shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-[#e2e8f0] flex items-center gap-2" style={{ background: 'linear-gradient(135deg, #f8fafc, #eff6ff)' }}>
+              <Database className="w-4 h-4 text-[#185baf]" />
+              <span className="text-[12px] font-black text-[#0f172a] uppercase tracking-tight">Migration Roadmap</span>
+            </div>
+            <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              {[
+                { phase: '01', title: 'Database', desc: 'Translate local data to a PostgreSQL instance on Supabase.', badge: 'Free Tier Ready', bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' },
+                { phase: '02', title: 'API Layer', desc: 'Build a Node.js server container to process UniTime requests safely.', badge: 'REST / GraphQL', bg: '#eff6ff', color: '#185baf', border: '#bfdbfe' },
+                { phase: '03', title: 'Scale Out', desc: 'Transition to paid tiers when database limits are exceeded (>500 MB).', badge: 'Cost Projected', bg: '#f8fafc', color: '#64748b', border: '#e2e8f0' },
+              ].map(item => (
+                <div key={item.phase} className="border border-[#e2e8f0] p-4 hover:shadow-sm transition-shadow">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-6 h-6 flex items-center justify-center text-[10px] font-black text-white" style={{ background: 'linear-gradient(135deg, #185baf, #0891b2)' }}>
+                      {item.phase}
+                    </div>
+                    <h4 className="text-[11px] font-black text-[#0f172a] uppercase tracking-wide">{item.title}</h4>
+                  </div>
+                  <p className="text-[11px] text-[#64748b] leading-relaxed mb-3">{item.desc}</p>
+                  <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 border"
+                    style={{ color: item.color, background: item.bg, borderColor: item.border }}>
+                    {item.badge}
+                  </span>
                 </div>
-
-                <div className="p-3 bg-white border border-[#ccc]">
-                   <h4 className="text-[9px] font-black uppercase text-[#666] tracking-widest mb-1 border-b border-[#eee] pb-1">Phase 2: API Layer</h4>
-                   <p className="text-[10px] font-bold text-[#333] leading-relaxed mb-3 mt-2">Build a Node.js server container to process UniTime requests safely.</p>
-                   <div className="inline-block bg-[#e0ebf9] text-[#185baf] border border-[#b2d4f5] px-1 text-[8px] font-black uppercase">REST / GraphQL</div>
-                </div>
-
-                <div className="p-3 bg-white border border-[#ccc]">
-                   <h4 className="text-[9px] font-black uppercase text-[#666] tracking-widest mb-1 border-b border-[#eee] pb-1">Phase 3: Scale Out</h4>
-                   <p className="text-[10px] font-bold text-[#333] leading-relaxed mb-3 mt-2">Transition to paid hosting tiers when database limits are exceeded (&gt;500MB).</p>
-                   <div className="inline-block bg-[#f0f0f0] text-[#666] border border-[#ccc] px-1 text-[8px] font-black uppercase">Cost Projected</div>
-                </div>
-             </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>

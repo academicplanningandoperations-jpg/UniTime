@@ -107,48 +107,78 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
 
       const mappedData = parsedRows.map((item, i) => {
         if (activeImportType === 'Modules') {
+          // Accept both app format (_unique_name) and Supabase format (code, name)
+          const uniqueName = item._unique_name || item._module_id || item.code || `M${i}`;
+          const displayName = item._name || item.name || 'Unknown Module';
           return {
             ...termTag,
-            id: makeId('m', item._unique_name || item._module_id, i),
-            code: item._unique_name || `M${i}`,
-            name: item._name || 'Unknown Module',
-            academicYear: item._academic_year || '2025',
-            semester: Number(item.Semester?.replace('SEM-', '')) || 1,
-            credits: 3, department: 'General', duration: 1, type: 'Theory',
-            _module_id: item._module_id, _unique_name: item._unique_name,
-            _name: item._name, _academic_year: item._academic_year, Semester: item.Semester
+            id: makeId('m', uniqueName, i),
+            code: uniqueName,
+            name: displayName,
+            academicYear: item._academic_year || item.academicYear || '2025',
+            semester: Number((item.Semester || '').replace('SEM-', '')) || item.semester || 1,
+            credits: item.credits || 3,
+            department: item.department || 'General',
+            duration: item.duration || 1,
+            type: item.type || 'Theory',
+            _module_id: item._module_id || item.id,
+            _unique_name: item._unique_name || item.code,
+            _name: item._name || item.name,
+            _academic_year: item._academic_year || item.academicYear,
+            Semester: item.Semester || (item.semester ? `SEM-${item.semester}` : undefined)
           };
         }
         if (activeImportType === 'Faculties') {
+          // Accept both app format (_Faculty_ID) and Supabase format (facultyId, name, department)
+          const facultyId = item._Faculty_ID || item._staff_id || item.facultyId || item.id;
+          const displayName = item._Faculty_name || item.name || 'Unknown Faculty';
           return {
             ...termTag,
-            id: makeId('f', item._Faculty_ID || item._staff_id, i),
-            facultyId: item._Faculty_ID || item._staff_id,
-            name: item._Faculty_name || 'Unknown Faculty',
-            department: item._deptName || 'General',
-            email: item._email || '',
-            maxHoursPerWeek: 18, availability: [],
-            _staff_id: item._staff_id, _Faculty_ID: item._Faculty_ID,
-            _Faculty_name: item._Faculty_name, _deptName: item._deptName, _email: item._email
+            id: makeId('f', facultyId, i),
+            facultyId,
+            name: displayName,
+            department: item._deptName || item.department || 'General',
+            email: item._email || item.email || '',
+            maxHoursPerWeek: item.maxHoursPerWeek || 18,
+            availability: item.availability || [],
+            _staff_id: item._staff_id || item.id,
+            _Faculty_ID: item._Faculty_ID || item.facultyId,
+            _Faculty_name: item._Faculty_name || item.name,
+            _deptName: item._deptName || item.department,
+            _email: item._email || item.email
           };
         }
         if (activeImportType === 'Rooms') {
+          // Accept both app format (_unique_name) and Supabase format (name, type, capacity)
+          const uniqueName = item._unique_name || item._room_id || item.name || `R${i}`;
+          const displayName = item._name || item._unique_name || item.name || 'Unknown Room';
           return {
             ...termTag,
-            id: makeId('r', item._unique_name || item._room_id, i),
-            name: item._name || item._unique_name || 'Unknown Room',
-            capacity: 60, type: 'Lecture',
-            _room_id: item._room_id, _unique_name: item._unique_name,
-            _name: item._name, _custom1: item._custom1, _custom2: item._custom2
+            id: makeId('r', uniqueName, i),
+            name: displayName,
+            capacity: item.capacity || 0,
+            type: item.type || item._custom1 || 'Classroom',
+            _room_id: item._room_id || item.id,
+            _unique_name: item._unique_name || item.name,
+            _name: item._name || item.name,
+            _custom1: item._custom1 || item.type,
+            _custom2: item._custom2
           };
         }
         if (activeImportType === 'Cohorts') {
+          // Accept both app format (_unique_name) and Supabase format (name, program, semester)
+          const uniqueName = item._unique_name || item._cohort_id || item.name || `C${i}`;
+          const displayName = item._name || item._unique_name || item.name || 'Unknown Cohort';
           return {
             ...termTag,
-            id: makeId('g', item._unique_name || item._cohort_id, i),
-            name: item._name || item._unique_name || 'Unknown Cohort',
-            program: 'General', semester: 1, studentCount: 30,
-            _cohort_id: item._cohort_id, _unique_name: item._unique_name, _name: item._name
+            id: makeId('g', uniqueName, i),
+            name: displayName,
+            program: item.program || 'General',
+            semester: item.semester || 1,
+            studentCount: item.studentCount || 0,
+            _cohort_id: item._cohort_id || item.id,
+            _unique_name: item._unique_name || item.name,
+            _name: item._name || item.name
           };
         }
         return { ...termTag, ...item };

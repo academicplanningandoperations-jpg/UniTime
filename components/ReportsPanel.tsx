@@ -362,7 +362,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
   );
 
   return (
-    <div className="space-y-0 flex flex-col h-full">
+    <div className="space-y-0 p-0">
       {/* Header */}
       <div className="mx-2 mt-2 mb-3 overflow-hidden relative" style={{ background: 'linear-gradient(135deg, #0c1b3a 0%, #0f2d5e 35%, #185baf 70%, #1a7fd4 100%)' }}>
         <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />

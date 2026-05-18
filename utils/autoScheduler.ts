@@ -13,6 +13,8 @@ export interface CourseAssignment {
   preferredRooms: string[];   // pipe-sep in CSV (e.g. "1001|1002") to avoid Excel comma issues
   labHours: number;           // 2 (default) or 4
   semester: string;           // label only — e.g. "Semester 1"
+  dayForBlock: string;        // days to block for BOTH faculty AND cohorts on this row
+  timeForBlock: string;       // hours to block for BOTH (e.g. "8,9,14")
   facultyBlockDay: string;    // days to block for THIS faculty only
   facultyBlockTime: string;   // hours to block for THIS faculty only  (e.g. "8,9,14")
   cohortBlockDay: string;     // days to block for the cohorts in this row
@@ -177,12 +179,23 @@ export async function runAutoScheduler(
     if (entry.roomId) markBusy(roomOcc, entry.roomId, keys);
   }
 
-  // ── Pre-pass: apply faculty-specific and cohort-specific blocks ────────────
+  // ── Pre-pass: apply block columns ─────────────────────────────────────────
   for (const asgn of assignments) {
     const faculty = findFaculty(asgn.facultyId, asgn.facultyName);
     const groups  = asgn.cohorts.map(findGroup).filter(Boolean) as StudentGroup[];
 
-    // Block slots for this faculty only
+    // Day-For-Block / Time-For-Block — blocks BOTH faculty AND cohorts simultaneously
+    if (asgn.dayForBlock.trim() && asgn.timeForBlock.trim()) {
+      for (const day of parseDays(asgn.dayForBlock)) {
+        for (const hour of parseHours(asgn.timeForBlock)) {
+          const key = [`${day}~${pad(hour)}`];
+          if (faculty) markBusy(facultyOcc, faculty.id, key);
+          groups.forEach(g => markBusy(cohortOcc, g.id, key));
+        }
+      }
+    }
+
+    // FacultyBlockDay / FacultyBlockTime — blocks only this faculty
     if (asgn.facultyBlockDay.trim() && asgn.facultyBlockTime.trim() && faculty) {
       for (const day of parseDays(asgn.facultyBlockDay)) {
         for (const hour of parseHours(asgn.facultyBlockTime)) {
@@ -191,7 +204,7 @@ export async function runAutoScheduler(
       }
     }
 
-    // Block slots for the cohorts in this row only
+    // CohortBlockDay / CohortBlockTime — blocks only the cohorts in this row
     if (asgn.cohortBlockDay.trim() && asgn.cohortBlockTime.trim() && groups.length > 0) {
       for (const day of parseDays(asgn.cohortBlockDay)) {
         for (const hour of parseHours(asgn.cohortBlockTime)) {
@@ -339,18 +352,20 @@ export async function runAutoScheduler(
 
 // ─── CSV template strings ────────────────────────────────────────────────────
 
-// 31 columns (indices 0-30):
+// 33 columns (indices 0-32):
 // 0:FacultyID  1:FacultyName  2:CourseCode  3:CourseName  4:Credits  5:Category  6:Campus
 // 7-18: Cohort1-12
 // 19:FixedRoom  20:PreferredRooms  21:LabHours  22:Semester
-// 23:FacultyBlockDay  24:FacultyBlockTime  25:CohortBlockDay  26:CohortBlockTime
-// 27:FacultyWorkingDays  28:FacultyTimeStart  29:FacultyTimeEnd  30:CohortLunchStart
+// 23:Day-For-Block  24:Time-For-Block  (blocks both faculty AND cohort)
+// 25:FacultyBlockDay  26:FacultyBlockTime  27:CohortBlockDay  28:CohortBlockTime
+// 29:FacultyWorkingDays  30:FacultyTimeStart  31:FacultyTimeEnd  32:CohortLunchStart
 
 function _row(
   facultyId: string, facultyName: string,
   courseCode: string, courseName: string, credits: string, category: string, campus: string,
   cohorts: string[],
   fixedRoom: string, preferredRooms: string, labHours: string, semester: string,
+  dayForBlock: string, timeForBlock: string,
   facultyBlockDay: string, facultyBlockTime: string,
   cohortBlockDay: string, cohortBlockTime: string,
   workingDays: string, timeStart: string, timeEnd: string, lunchStart: string,
@@ -360,6 +375,7 @@ function _row(
     facultyId, facultyName, courseCode, courseName, credits, category, campus,
     ...c,
     fixedRoom, preferredRooms, labHours, semester,
+    dayForBlock, timeForBlock,
     facultyBlockDay, facultyBlockTime,
     cohortBlockDay, cohortBlockTime,
     workingDays, timeStart, timeEnd, lunchStart,
@@ -372,6 +388,7 @@ const _HDR =
   'FacultyID,FacultyName,CourseCode,CourseName,Credits,Category,Campus,' +
   'Cohort1,Cohort2,Cohort3,Cohort4,Cohort5,Cohort6,Cohort7,Cohort8,Cohort9,Cohort10,Cohort11,Cohort12,' +
   'FixedRoom,PreferredRooms,LabHours,Semester,' +
+  'Day-For-Block,Time-For-Block,' +
   'FacultyBlockDay,FacultyBlockTime,CohortBlockDay,CohortBlockTime,' +
   'FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart';
 
@@ -380,37 +397,42 @@ export const COURSE_TEMPLATE_CSV = [
   // Theory — 3 sessions/week
   _row('600001','John Smith','CS301','Data Structures','3','Theory','K1',
     ['CS-Y3-A','CS-Y3-B'], '','','','1',
-    '','', '','',
+    '','', '','', '','',
     'Mon-Fri','8','16','13'),
   // Lab — 2-hour, fixed room
   _row('600002','Jane Doe','CS401','Lab Practical','2','Lab','K1',
     ['CS-Y4-A'], 'IT201','','2','2',
-    '','', '','',
+    '','', '','', '','',
     'Mon-Fri','8','16','13'),
   // Lab — 4-hour, multiple preferred rooms (use | not comma to avoid Excel issues)
   _row('600005','Dr. Patel','HS501','Clinical Lab','1','Lab','AB',
     ['HS-Y3-A'], '','AB-Lab1|AB-Lab2','4','3',
-    '','', '','',
+    '','', '','', '','',
     'Mon-Fri','8','16','13'),
   // Studio
   _row('600003','Alice Brown','DES501','Design Studio','2','Studio','AB',
     ['DES-Y5-A'], '','','','2',
-    '','', '','',
+    '','', '','', '','',
     'Mon-Fri','10','18','13'),
-  // Faculty block — faculty 600001 is unavailable Mon-Fri at 9:00
+  // Day-For-Block — blocks both faculty AND cohort CS-Y3-A on Tuesday at 10,11
+  _row('600001','John Smith','','','0','','',
+    ['CS-Y3-A'], '','','','1',
+    'Tuesday','10,11', '','', '','',
+    'Mon-Fri','8','16','13'),
+  // Faculty block — faculty 600001 is unavailable Monday at 9
   _row('600001','John Smith','','','0','','',
     [], '', '','','1',
-    'Mon-Fri','9', '','',
+    '','', 'Monday','9', '','',
     'Mon-Fri','8','16','13'),
   // Cohort block — CS-Y3-A has assembly every Monday at 10:00 and 11:00
   _row('600001','John Smith','','','0','','',
     ['CS-Y3-A'], '','','','1',
-    '','', 'Monday','10,11',
+    '','', '','', 'Monday','10,11',
     'Mon-Fri','8','16','13'),
-  // Combined — block faculty on Friday afternoon AND cohort on Wednesday morning
+  // Combined separate — block faculty Friday pm AND cohort Wednesday morning
   _row('600002','Jane Doe','','','0','','',
     ['CS-Y4-A'], '','','','2',
-    'Friday','14,15', 'Wednesday','8,9',
+    '','', 'Friday','14,15', 'Wednesday','8,9',
     'Mon-Fri','8','16','13'),
 ].join('\n');
 

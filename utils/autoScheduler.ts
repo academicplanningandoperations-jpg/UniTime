@@ -282,29 +282,57 @@ export async function runAutoScheduler(
 
 // ─── CSV template strings ────────────────────────────────────────────────────
 
-export const COURSE_TEMPLATE_CSV = [
+// Header: 29 columns (indices 0-28)
+// 0:FacultyID 1:FacultyName 2:CourseCode 3:CourseName 4:Credits 5:Category 6:Campus
+// 7-18:Cohort1-12  19:FixedRoom 20:PreferredRooms 21:LabHours 22:Semester
+// 23:Day-For-Block 24:Time-For-Block 25:FacultyWorkingDays 26:FacultyTimeStart 27:FacultyTimeEnd 28:CohortLunchStart
+
+function _row(
+  facultyId: string, facultyName: string,
+  courseCode: string, courseName: string, credits: string, category: string, campus: string,
+  cohorts: string[],         // up to 12 — padded to exactly 12 slots
+  fixedRoom: string, preferredRooms: string, labHours: string, semester: string,
+  dayForBlock: string, timeForBlock: string,
+  workingDays: string, timeStart: string, timeEnd: string, lunchStart: string,
+): string {
+  const c = [...cohorts, ...Array(12).fill('')].slice(0, 12);
+  const vals = [
+    facultyId, facultyName, courseCode, courseName, credits, category, campus,
+    ...c,
+    fixedRoom, preferredRooms, labHours, semester,
+    dayForBlock, timeForBlock,
+    workingDays, timeStart, timeEnd, lunchStart,
+  ];
+  // Wrap any value that contains a comma in double-quotes (valid CSV)
+  return vals.map(v => v.includes(',') ? `"${v}"` : v).join(',');
+}
+
+const _HDR =
   'FacultyID,FacultyName,CourseCode,CourseName,Credits,Category,Campus,' +
   'Cohort1,Cohort2,Cohort3,Cohort4,Cohort5,Cohort6,Cohort7,Cohort8,Cohort9,Cohort10,Cohort11,Cohort12,' +
   'FixedRoom,PreferredRooms,LabHours,Semester,Day-For-Block,Time-For-Block,' +
-  'FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart',
+  'FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart';
 
-  // Theory — 3 sessions/week
-  '600001,John Smith,CS301,Data Structures,3,Theory,K1,CS-Y3-A,CS-Y3-B,,,,,,,,,,,,,,1,,,Mon-Fri,8,16,13',
-
+export const COURSE_TEMPLATE_CSV = [
+  _HDR,
+  // Theory — 3 sessions/week, no fixed/preferred room
+  _row('600001','John Smith','CS301','Data Structures','3','Theory','K1',
+    ['CS-Y3-A','CS-Y3-B'], '','','','1', '','', 'Mon-Fri','8','16','13'),
   // Lab — 2-hour, fixed room
-  '600002,Jane Doe,CS401,Lab Practical,2,Lab,K1,CS-Y4-A,,,,,,,,,,,,,IT201,,2,2,,,Mon-Fri,8,16,13',
-
-  // Lab — 4-hour (e.g. Health Sciences), multiple preferred rooms
-  '600005,Dr. Patel,HS501,Clinical Lab,1,Lab,AB,HS-Y3-A,,,,,,,,,,,,,,"AB-Lab1,AB-Lab2",4,3,,,Mon-Fri,8,16,13',
-
+  _row('600002','Jane Doe','CS401','Lab Practical','2','Lab','K1',
+    ['CS-Y4-A'], 'IT201','','2','2', '','', 'Mon-Fri','8','16','13'),
+  // Lab — 4-hour (Health Sciences), multiple preferred rooms (comma-sep in one cell)
+  _row('600005','Dr. Patel','HS501','Clinical Lab','1','Lab','AB',
+    ['HS-Y3-A'], '','AB-Lab1,AB-Lab2','4','3', '','', 'Mon-Fri','8','16','13'),
   // Studio
-  '600003,Alice Brown,DES501,Design Studio,2,Studio,AB,DES-Y5-A,,,,,,,,,,,,,,,,,2,,,Mon-Fri,10,18,13',
-
-  // Block-only row: no course — just blocks Monday 10:00 and 11:00 for faculty 600001 + cohort CS-Y3-A
-  '600001,John Smith,,,0,,,CS-Y3-A,,,,,,,,,,,,,,,,,1,Monday,"10,11",Mon-Fri,8,16,13',
-
-  // Course row that ALSO blocks a slot: schedules CS302 AND blocks Friday 14:00 for that faculty/cohort
-  '600001,John Smith,CS302,Algorithms,3,Theory,K1,CS-Y3-A,CS-Y3-B,,,,,,,,,,,,,,,1,Friday,14,Mon-Fri,8,16,13',
+  _row('600003','Alice Brown','DES501','Design Studio','2','Studio','AB',
+    ['DES-Y5-A'], '','','','2', '','', 'Mon-Fri','10','18','13'),
+  // Block-only — no course: blocks Monday hours 10 and 11 for this faculty+cohort
+  _row('600001','John Smith','','','0','','',
+    ['CS-Y3-A'], '','','','1', 'Monday','10,11', 'Mon-Fri','8','16','13'),
+  // Block-only — blocks entire Mon-Fri at hour 9 (e.g. morning assembly)
+  _row('600002','Jane Doe','','','0','','',
+    ['CS-Y4-A'], '','','','2', 'Mon-Fri','9', 'Mon-Fri','8','16','13'),
 ].join('\n');
 
 export const ROOM_CAMPUS_TEMPLATE_CSV = [

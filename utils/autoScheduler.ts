@@ -6,10 +6,13 @@ export interface CourseAssignment {
   courseCode: string;
   courseName: string;
   credits: number;
-  category: string;        // 'Theory' | 'Lab' | 'Tutorial' | 'Studio'
+  category: string;        // 'Theory' | 'Lab' | 'Tutorial' | 'Studio' | 'Block'
   campus: string;
   cohorts: string[];       // cohort names — may be 1 or many (shared session)
   fixedRoom: string;
+  preferredRooms: string[];  // tried before campus fallback, comma-sep in CSV
+  labHours: number;          // 2 (default) or 4 — only applies when category=Lab
+  blockDay: string;          // e.g. 'Monday' — which day to block (category=Block rows only)
   workingDays: string;     // 'Mon-Fri' | 'Tue-Sat'
   timeStart: number;       // 8 or 10
   timeEnd: number;         // 16 or 18
@@ -119,20 +122,40 @@ export async function runAutoScheduler(
   const findRoom = (name: string) =>
     existingRooms.find(r => r.name === name || (r as any)._unique_name === name);
 
-  const totalSessions = assignments.reduce((s, a) => s + Math.max(1, a.credits || 1), 0);
+  // ── Pre-pass: apply blocked slots before scheduling any course ──────────
+  const blockRows = assignments.filter(a => a.category.toLowerCase() === 'block');
+  for (const blk of blockRows) {
+    const blockDays = blk.blockDay
+      ? [blk.blockDay]
+      : (DAYS_MAP[blk.workingDays] || DAYS_MAP['Mon-Fri']);
+    for (const day of blockDays) {
+      const keys = slotKeys(day, pad(blk.timeStart || 8), pad(blk.timeEnd || 16));
+      const faculty = findFaculty(blk.facultyId, blk.facultyName);
+      const groups  = blk.cohorts.map(findGroup).filter(Boolean) as StudentGroup[];
+      if (faculty) markBusy(facultyOcc, faculty.id, keys);
+      groups.forEach(g => markBusy(cohortOcc, g.id, keys));
+    }
+  }
 
-  // Harder assignments first: Lab (2 hr) → many cohorts → theory
-  const sorted = [...assignments].sort((a, b) => {
+  // ── Sort non-block assignments: longer Labs first, then by cohort count ──
+  const courseRows = assignments.filter(a => a.category.toLowerCase() !== 'block');
+  const totalSessions = courseRows.reduce((s, a) => s + Math.max(1, a.credits || 1), 0);
+
+  const sorted = [...courseRows].sort((a, b) => {
     const al = a.category === 'Lab' ? 0 : 1;
     const bl = b.category === 'Lab' ? 0 : 1;
     if (al !== bl) return al - bl;
+    if (al === 0) {
+      const ah = a.labHours || 2, bh = b.labHours || 2;
+      if (ah !== bh) return bh - ah;   // 4-hr labs before 2-hr labs
+    }
     return b.cohorts.length - a.cohorts.length;
   });
 
   for (let ai = 0; ai < sorted.length; ai++) {
     const asgn = sorted[ai];
     const isLab      = asgn.category === 'Lab';
-    const duration   = isLab ? 2 : 1;
+    const duration   = isLab ? (asgn.labHours || 2) : 1;
     const sessionsNeeded = Math.max(1, asgn.credits || 1);
     const days  = DAYS_MAP[asgn.workingDays] || DAYS_MAP['Mon-Fri'];
     const slots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, asgn.lunchStart || 13, duration);
@@ -163,26 +186,36 @@ export async function runAutoScheduler(
       let pickedRoom: Room | undefined;
 
       if (asgn.fixedRoom) {
+        // Fixed room — must use this specific room or skip
         const r = findRoom(asgn.fixedRoom);
         if (r && isFree(roomOcc, r.id, keys)) pickedRoom = r;
       } else {
-        const campusRooms = existingRooms.filter(r => {
-          const campus = roomCampusMap.get(r.name)
-            ?? roomCampusMap.get((r as any)._unique_name ?? '')
-            ?? '';
-          return !asgn.campus || campus === asgn.campus;
-        });
+        // Try preferred rooms first (in listed order)
+        const preferredObjs = asgn.preferredRooms
+          .map(name => findRoom(name))
+          .filter(Boolean) as Room[];
+        pickedRoom = preferredObjs.find(r => isFree(roomOcc, r.id, keys));
 
-        // Prefer type-matched room (Lab→lab, Studio→studio, Theory→non-lab)
-        const preferred = campusRooms.filter(r => {
-          const t = (r.type || '').toLowerCase();
-          if (isLab) return t.includes('lab');
-          if (asgn.category === 'Studio') return t.includes('studio');
-          return !t.includes('lab') && !t.includes('studio') && !t.includes('audit');
-        });
+        if (!pickedRoom) {
+          // Fall back to campus/type-matched rooms
+          const campusRooms = existingRooms.filter(r => {
+            const campus = roomCampusMap.get(r.name)
+              ?? roomCampusMap.get((r as any)._unique_name ?? '')
+              ?? '';
+            return !asgn.campus || campus === asgn.campus;
+          });
 
-        pickedRoom = preferred.find(r => isFree(roomOcc, r.id, keys))
-          ?? campusRooms.find(r => isFree(roomOcc, r.id, keys));
+          // Prefer type-matched room (Lab→lab, Studio→studio, Theory→non-lab)
+          const typeMatched = campusRooms.filter(r => {
+            const t = (r.type || '').toLowerCase();
+            if (isLab) return t.includes('lab');
+            if (asgn.category === 'Studio') return t.includes('studio');
+            return !t.includes('lab') && !t.includes('studio') && !t.includes('audit');
+          });
+
+          pickedRoom = typeMatched.find(r => isFree(roomOcc, r.id, keys))
+            ?? campusRooms.find(r => isFree(roomOcc, r.id, keys));
+        }
       }
 
       // Mark all occupancies
@@ -245,17 +278,30 @@ export async function runAutoScheduler(
 export const COURSE_TEMPLATE_CSV = [
   'FacultyID,FacultyName,CourseCode,CourseName,Credits,Category,Campus,' +
   'Cohort1,Cohort2,Cohort3,Cohort4,Cohort5,Cohort6,Cohort7,Cohort8,Cohort9,Cohort10,Cohort11,Cohort12,' +
-  'FixedRoom,WorkingDays,TimeStart,TimeEnd,LunchStart',
-  '600001,John Smith,CS301,Data Structures,3,Theory,K1,CS-Y3-A,CS-Y3-B,,,,,,,,,,,,Mon-Fri,8,16,13',
-  '600002,Jane Doe,CS401,Lab Practical,2,Lab,K1,CS-Y4-A,,,,,,,,,,,,IT201,Mon-Fri,8,16,13',
-  '600003,Alice Brown,DES501,Design Studio,2,Studio,AB,DES-Y5-A,,,,,,,,,,,,,Tue-Sat,10,18,13',
+  'FixedRoom,PreferredRooms,LabHours,BlockDay,FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart',
+
+  // Theory — 3 sessions/week, no fixed room
+  '600001,John Smith,CS301,Data Structures,3,Theory,K1,CS-Y3-A,CS-Y3-B,,,,,,,,,,,,,,Mon-Fri,8,16,13',
+
+  // Lab — 2-hour default lab, fixed room
+  '600002,Jane Doe,CS401,Lab Practical,2,Lab,K1,CS-Y4-A,,,,,,,,,,,,,IT201,,2,,Mon-Fri,8,16,13',
+
+  // Lab — 4-hour lab (e.g. Health Sciences), preferred rooms listed
+  '600005,Dr. Patel,HS501,Clinical Lab,1,Lab,AB,HS-Y3-A,,,,,,,,,,,,,,AB-Lab1,AB-Lab2,4,,Mon-Fri,8,16,13',
+
+  // Studio
+  '600003,Alice Brown,DES501,Design Studio,2,Studio,AB,DES-Y5-A,,,,,,,,,,,,,,,,Mon-Fri,10,18,13',
+
+  // Block — reserves Monday 8–12 for faculty 600001 and cohort CS-Y3-A (no session scheduled)
+  '600001,John Smith,BLOCK,,0,Block,,CS-Y3-A,,,,,,,,,,,,,,,,Monday,Mon-Fri,8,12,13',
 ].join('\n');
 
 export const ROOM_CAMPUS_TEMPLATE_CSV = [
   'RoomName,Campus',
   'K1007,K1',
   'K2001,K2',
-  'AB-11L-005,AB',
+  'AB-Lab1,AB',
+  'AB-Lab2,AB',
   'IT201,K1',
   'RD001,RD',
 ].join('\n');

@@ -40,19 +40,22 @@ function getTermWeeks(term: Term | undefined): number[] {
 }
 
 const COLS: [string, string, string, string, string][] = [
-  ['FacultyID',    'e.g. 600001',              '#4338ca', '#eef2ff', '#c7d2fe'],
-  ['FacultyName',  'e.g. John Smith',           '#4338ca', '#eef2ff', '#c7d2fe'],
-  ['CourseCode',   'e.g. CS301',                '#7c3aed', '#f5f3ff', '#ddd6fe'],
-  ['CourseName',   'e.g. Data Structures',      '#7c3aed', '#f5f3ff', '#ddd6fe'],
-  ['Credits',      '3 = 3 sessions / week',     '#059669', '#ecfdf5', '#a7f3d0'],
-  ['Category',     'Theory / Lab / Tutorial',   '#059669', '#ecfdf5', '#a7f3d0'],
-  ['Campus',       'K1, K2, AB, RD…',          '#0891b2', '#ecfeff', '#a5f3fc'],
-  ['Cohort1–12',   'shared cohorts on one row', '#0891b2', '#ecfeff', '#a5f3fc'],
-  ['FixedRoom',    'optional specific room',    '#d97706', '#fffbeb', '#fde68a'],
-  ['WorkingDays',  'Mon-Fri or Tue-Sat',        '#d97706', '#fffbeb', '#fde68a'],
-  ['TimeStart',    '8 or 10',                   '#e11d48', '#fff1f2', '#fecdd3'],
-  ['TimeEnd',      '16 or 18',                  '#e11d48', '#fff1f2', '#fecdd3'],
-  ['LunchStart',   '12, 13, or 14',             '#64748b', '#f8fafc', '#e2e8f0'],
+  ['FacultyID',           'e.g. 600001',              '#4338ca', '#eef2ff', '#c7d2fe'],
+  ['FacultyName',         'e.g. John Smith',           '#4338ca', '#eef2ff', '#c7d2fe'],
+  ['CourseCode',          'e.g. CS301',                '#7c3aed', '#f5f3ff', '#ddd6fe'],
+  ['CourseName',          'e.g. Data Structures',      '#7c3aed', '#f5f3ff', '#ddd6fe'],
+  ['Credits',             '3 = 3 sessions / week',     '#059669', '#ecfdf5', '#a7f3d0'],
+  ['Category',            'Theory/Lab/Studio/Block',   '#059669', '#ecfdf5', '#a7f3d0'],
+  ['Campus',              'K1, K2, AB, RD…',          '#0891b2', '#ecfeff', '#a5f3fc'],
+  ['Cohort1–12',          'shared cohorts on one row', '#0891b2', '#ecfeff', '#a5f3fc'],
+  ['FixedRoom',           'locks to this exact room',  '#d97706', '#fffbeb', '#fde68a'],
+  ['PreferredRooms',      'comma-sep, priority rooms', '#d97706', '#fffbeb', '#fde68a'],
+  ['LabHours',            '2 (default) or 4',          '#7c3aed', '#f5f3ff', '#ddd6fe'],
+  ['BlockDay',            'Monday–Sat (Block rows)',   '#4338ca', '#eef2ff', '#c7d2fe'],
+  ['FacultyWorkingDays',  'Mon-Fri or Tue-Sat',        '#d97706', '#fffbeb', '#fde68a'],
+  ['FacultyTimeStart',    '8 or 10 (faculty roster)',  '#e11d48', '#fff1f2', '#fecdd3'],
+  ['FacultyTimeEnd',      '16 or 18 (faculty roster)', '#e11d48', '#fff1f2', '#fecdd3'],
+  ['CohortLunchStart',    '12, 13, or 14 (cohort)',    '#64748b', '#f8fafc', '#e2e8f0'],
 ];
 
 const STEP_GRADS = [
@@ -94,20 +97,23 @@ const AutoSchedulePanel: React.FC<Props> = ({
         const rows = res.data as Record<string, string>[];
         if (!rows.length) { setParseError('Course file is empty'); return; }
         const parsed: CourseAssignment[] = rows.map(r => ({
-          facultyId:   (r.FacultyID   || '').trim(),
-          facultyName: (r.FacultyName || '').trim(),
-          courseCode:  (r.CourseCode  || '').trim(),
-          courseName:  (r.CourseName  || '').trim(),
-          credits:     Math.max(1, parseInt(r.Credits) || 1),
-          category:    (r.Category    || 'Theory').trim(),
-          campus:      (r.Campus      || '').trim(),
-          cohorts:     Array.from({ length: 12 }, (_, i) => (r[`Cohort${i + 1}`] || '').trim()).filter(Boolean),
-          fixedRoom:   (r.FixedRoom   || '').trim(),
-          workingDays: ((r.WorkingDays || '').trim() || defDays) as any,
-          timeStart:   parseInt(r.TimeStart) || defStart,
-          timeEnd:     parseInt(r.TimeEnd)   || defEnd,
-          lunchStart:  parseInt(r.LunchStart) || defLunch,
-        })).filter(a => a.courseCode && a.facultyId);
+          facultyId:      (r.FacultyID      || '').trim(),
+          facultyName:    (r.FacultyName    || '').trim(),
+          courseCode:     (r.CourseCode     || '').trim(),
+          courseName:     (r.CourseName     || '').trim(),
+          credits:        Math.max(0, parseInt(r.Credits) || 0),
+          category:       (r.Category       || 'Theory').trim(),
+          campus:         (r.Campus         || '').trim(),
+          cohorts:        Array.from({ length: 12 }, (_, i) => (r[`Cohort${i + 1}`] || '').trim()).filter(Boolean),
+          fixedRoom:      (r.FixedRoom      || '').trim(),
+          preferredRooms: (r.PreferredRooms || '').split(',').map((s: string) => s.trim()).filter(Boolean),
+          labHours:       Math.max(1, parseInt(r.LabHours) || 2),
+          blockDay:       (r.BlockDay       || '').trim(),
+          workingDays:    ((r.FacultyWorkingDays || '').trim() || defDays) as any,
+          timeStart:      parseInt(r.FacultyTimeStart) || defStart,
+          timeEnd:        parseInt(r.FacultyTimeEnd)   || defEnd,
+          lunchStart:     parseInt(r.CohortLunchStart) || defLunch,
+        })).filter(a => a.facultyId && (a.courseCode || a.category.toLowerCase() === 'block'));
         if (!parsed.length) { setParseError('No valid rows — check column headers match template'); return; }
         setAssignments(parsed); setCourseFileName(file.name); setResult(null);
       },
@@ -214,7 +220,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </button>
               </div>
               <p className="text-[9px] text-[#4338ca] leading-relaxed bg-[#eef2ff] border border-[#c7d2fe] px-2 py-1.5">
-                <strong>Course:</strong> one row per faculty-course. Multiple cohorts on same row (Cohort1, Cohort2…).&ensp;
+                <strong>Course:</strong> one row per faculty-course. Multiple cohorts on same row. Use <strong>Category=Block</strong> + <strong>BlockDay</strong> to reserve timeslots. <strong>PreferredRooms</strong> = comma-sep priority list. <strong>LabHours</strong> = 2 or 4.&ensp;
                 <strong>Room-Campus:</strong> maps room names to campus codes.
               </p>
             </div>

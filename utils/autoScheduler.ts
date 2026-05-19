@@ -60,6 +60,7 @@ export interface SchedulerResult {
 const DAYS_MAP: Record<string, string[]> = {
   'Mon-Fri': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
   'Tue-Sat': ['Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  'Mon-Sat': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
 };
 
 const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -301,8 +302,8 @@ export async function runAutoScheduler(
 
   // Longer labs first, then by cohort count (hardest to place → schedule first)
   const sorted = [...courseRows].sort((a, b) => {
-    const al = a.category === 'Lab' ? 0 : 1;
-    const bl = b.category === 'Lab' ? 0 : 1;
+    const al = a.category.toLowerCase() === 'lab' ? 0 : 1;
+    const bl = b.category.toLowerCase() === 'lab' ? 0 : 1;
     if (al !== bl) return al - bl;
     if (al === 0) {
       const ah = a.labHours || 2, bh = b.labHours || 2;
@@ -313,11 +314,11 @@ export async function runAutoScheduler(
 
   for (let ai = 0; ai < sorted.length; ai++) {
     const asgn = sorted[ai];
-    const isLab         = asgn.category === 'Lab';
+    const isLab         = asgn.category.toLowerCase() === 'lab';
     const duration      = isLab ? (asgn.labHours || 2) : 1;
     const is4HrLab      = isLab && duration >= 4;   // exempt from 3-consecutive-hour rule
-    const sessionsNeeded = asgn.credits;
-    const days  = DAYS_MAP[asgn.workingDays] || DAYS_MAP['Mon-Fri'];
+    const sessionsNeeded = asgn.category.toLowerCase() === 'tutorial' ? 1 : asgn.credits;
+    const days  = parseDays(asgn.workingDays).length ? parseDays(asgn.workingDays) : DAYS_MAP['Mon-Fri'];
     const slots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, asgn.lunchStart || 13, duration);
 
     const course   = findCourse(asgn.courseCode);
@@ -375,7 +376,7 @@ export async function runAutoScheduler(
           const typeMatched = campusRooms.filter(r => {
             const t = (r.type || '').toLowerCase();
             if (isLab) return t.includes('lab');
-            if (asgn.category === 'Studio') return t.includes('studio');
+            if (asgn.category.toLowerCase() === 'studio') return t.includes('studio');
             return !t.includes('lab') && !t.includes('studio') && !t.includes('audit');
           });
 
@@ -396,7 +397,7 @@ export async function runAutoScheduler(
         termId,
         courseId:     course?.id   || asgn.courseCode,
         facultyId:    faculty?.id  || asgn.facultyId,
-        roomId:       pickedRoom?.id || '',
+        roomId:       pickedRoom?.id ?? null,
         groupIds,
         day,
         startTime,

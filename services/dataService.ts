@@ -333,8 +333,12 @@ export class DataService {
     const sanitized = newEntries.map(e => this.sanitize('schedule', e, e.termId));
     const err = await this.upsertBatch('schedule', sanitized);
     this.lastWriteTimestamp = Date.now();
-    if (err) console.error('[DB] addEntries error:', err);
-    else console.log(`[DB] schedule: added ${newEntries.length} entries`);
+    if (err) {
+      console.error('[DB] addEntries error:', err);
+      throw new Error(`Failed to save ${newEntries.length} session(s) to the database: ${err}`);
+    } else {
+      console.log(`[DB] schedule: added ${newEntries.length} entries`);
+    }
   }
 
   static async deleteEntries(ids: string[], allEntries: ScheduleEntry[]): Promise<void> {

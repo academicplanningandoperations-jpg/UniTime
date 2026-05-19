@@ -74,7 +74,7 @@ export interface ScheduleEntry {
   termId: string;
   courseId: string;
   facultyId: string;
-  roomId: string;
+  roomId: string | null;
   groupIds: string[];
   day: DayOfWeek;
   startTime: string;

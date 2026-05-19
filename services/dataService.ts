@@ -287,24 +287,38 @@ export class DataService {
 
   static async deleteRecord(tableName: string, id: string): Promise<void> {
     if (!supabase) return;
-    try {
-      const { error } = await supabase.from(tableName).delete().eq('id', id);
-      if (error) console.error(`[DB] deleteRecord error for ${tableName}:`, error.message);
-      else console.log(`[DB] ${tableName}: explicitly deleted record ${id}`);
-    } catch (err) {
-      console.error(`[DB] deleteRecord crash on ${tableName}:`, err);
+    const { error } = await supabase.from(tableName).delete().eq('id', id);
+    if (error) {
+      console.error(`[DB] deleteRecord error for ${tableName}:`, error.message);
+      throw new Error(error.message);
     }
+    console.log(`[DB] ${tableName}: explicitly deleted record ${id}`);
   }
 
   static async deleteRecords(tableName: string, ids: string[]): Promise<void> {
     if (!supabase || ids.length === 0) return;
-    try {
-      const { error } = await supabase.from(tableName).delete().in('id', ids);
-      if (error) console.error(`[DB] deleteRecords error for ${tableName}:`, error.message);
-      else console.log(`[DB] ${tableName}: bulk-deleted ${ids.length} records`);
-    } catch (err) {
-      console.error(`[DB] deleteRecords crash on ${tableName}:`, err);
+    const { error } = await supabase.from(tableName).delete().in('id', ids);
+    if (error) {
+      console.error(`[DB] deleteRecords error for ${tableName}:`, error.message);
+      throw new Error(error.message);
     }
+    console.log(`[DB] ${tableName}: bulk-deleted ${ids.length} records`);
+  }
+
+  // Delete schedule entries referencing a given field/id set.
+  // Must be called BEFORE deleting rows from the parent table to avoid FK violations.
+  static async deleteScheduleCascade(
+    field: 'facultyId' | 'courseId' | 'roomId',
+    ids: string[],
+    allEntries: ScheduleEntry[],
+  ): Promise<ScheduleEntry[]> {
+    if (!supabase || ids.length === 0) return allEntries;
+    const remaining = allEntries.filter(e => !ids.includes((e as any)[field] ?? ''));
+    const { error } = await supabase.from('schedule').delete().in(field, ids);
+    if (error) console.warn(`[DB] schedule cascade-delete (${field}) warning:`, error.message);
+    else console.log(`[DB] schedule: cascade-deleted entries for ${field} [${ids.join(',')}]`);
+    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(remaining)); } catch {}
+    return remaining;
   }
 
   // ─── Schedule granular operations (multi-user safe) ──────────────────────────

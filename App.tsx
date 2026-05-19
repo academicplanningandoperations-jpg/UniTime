@@ -620,6 +620,11 @@ const App: React.FC = () => {
   const handleUpdateCourses = async (updatedCourses: Course[], onProgress?: ProgressFn) => {
     await withSync(async () => {
       const deletedIds = courses.filter(old => !updatedCourses.some(n => n.id === old.id)).map(c => c.id);
+      if (deletedIds.length > 0) {
+        // Cascade: remove schedule entries for deleted courses before deleting courses (FK constraint)
+        const remaining = await DataService.deleteScheduleCascade('courseId', deletedIds, scheduleRef.current);
+        setScheduleAndRef(remaining);
+      }
       setCourses(updatedCourses);
       await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id, onProgress);
       await DataService.deleteRecords('courses', deletedIds);
@@ -629,6 +634,11 @@ const App: React.FC = () => {
   const handleUpdateFaculties = async (updatedFaculties: Faculty[], onProgress?: ProgressFn) => {
     await withSync(async () => {
       const deletedIds = faculties.filter(old => !updatedFaculties.some(n => n.id === old.id)).map(f => f.id);
+      if (deletedIds.length > 0) {
+        // Cascade: remove schedule entries for deleted faculties before deleting faculties (FK constraint)
+        const remaining = await DataService.deleteScheduleCascade('facultyId', deletedIds, scheduleRef.current);
+        setScheduleAndRef(remaining);
+      }
       setFaculties(updatedFaculties);
       await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id, onProgress);
       await DataService.deleteRecords('faculties', deletedIds);
@@ -638,6 +648,11 @@ const App: React.FC = () => {
   const handleUpdateRooms = async (updatedRooms: Room[], onProgress?: ProgressFn) => {
     await withSync(async () => {
       const deletedIds = rooms.filter(old => !updatedRooms.some(n => n.id === old.id)).map(r => r.id);
+      if (deletedIds.length > 0) {
+        // Cascade: remove schedule entries for deleted rooms (FK constraint)
+        const remaining = await DataService.deleteScheduleCascade('roomId', deletedIds, scheduleRef.current);
+        setScheduleAndRef(remaining);
+      }
       setRooms(updatedRooms);
       await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id, onProgress);
       await DataService.deleteRecords('rooms', deletedIds);

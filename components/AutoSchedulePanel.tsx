@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { Download, Upload, Zap, CheckCircle, AlertTriangle, FileText, X, ChevronDown, ChevronUp, MapPin, Clock, Coffee, Calendar, GraduationCap } from 'lucide-react';
 import type { Course, Faculty, Room, StudentGroup, ScheduleEntry, Term, UserAccount } from '../types';
 import {
@@ -31,6 +32,42 @@ function downloadCSV(filename: string, content: string) {
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadConflictReport(unresolved: UnresolvedSession[], termName: string) {
+  const headers = [
+    'Course Code', 'Course Name', 'Faculty', 'Cohorts', 'Category',
+    'Placed', 'Needed', 'Primary Reason',
+    'Faculty Clash Slots', 'Cohort Clash Slots', 'Consecutive Hr Rejections',
+    'Fixed Room Rejections', 'Placed Without Room', 'Total Candidate Slots',
+    'Suggestion 1', 'Suggestion 2', 'Suggestion 3',
+  ];
+  const rows = unresolved.map(u => {
+    const d = u.diagnostics;
+    return [
+      u.courseCode, u.courseName, u.facultyName,
+      u.cohorts.join(', '), u.category,
+      u.sessionsPlaced, u.sessionsNeeded,
+      d?.primaryReason ?? u.reason,
+      d?.rejectedByFacultyClash ?? '', d?.rejectedByCohortClash ?? '',
+      d?.rejectedByConsecutiveHours ?? '', d?.rejectedByFixedRoom ?? '',
+      d?.noRoomAssigned ?? '', d?.totalCandidates ?? '',
+      d?.suggestions[0] ?? '', d?.suggestions[1] ?? '', d?.suggestions[2] ?? '',
+    ];
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 26 }, { wch: 22 }, { wch: 30 }, { wch: 10 },
+    { wch: 7 },  { wch: 7 },  { wch: 54 },
+    { wch: 16 }, { wch: 16 }, { wch: 20 },
+    { wch: 18 }, { wch: 18 }, { wch: 16 },
+    { wch: 65 }, { wch: 65 }, { wch: 65 },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Conflict Report');
+  const date = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `conflict_report_${termName.replace(/\s+/g, '_')}_${date}.xlsx`);
 }
 
 function getTermWeeks(term: Term | undefined): number[] {
@@ -549,35 +586,83 @@ const AutoSchedulePanel: React.FC<Props> = ({
                   {/* Unresolved */}
                   {result && result.unresolved.length > 0 && (
                     <div className="border-2 border-[#fde68a] overflow-hidden">
-                      <button onClick={() => setShowUnresolved(s => !s)}
-                        className="w-full flex items-center justify-between px-3 py-2 hover:opacity-90 transition-opacity"
-                        style={{ background: 'linear-gradient(135deg,#fffbeb,#fef3c7)' }}>
-                        <span className="text-[9px] font-black text-[#d97706] uppercase tracking-widest flex items-center gap-1.5">
-                          <AlertTriangle className="w-3 h-3" />
-                          {result.unresolved.length} Unresolved
-                        </span>
-                        {showUnresolved ? <ChevronUp className="w-3 h-3 text-[#d97706]" /> : <ChevronDown className="w-3 h-3 text-[#d97706]" />}
-                      </button>
+                      {/* Header row with expand + download */}
+                      <div className="flex items-center px-3 py-2" style={{ background: 'linear-gradient(135deg,#fffbeb,#fef3c7)' }}>
+                        <button onClick={() => setShowUnresolved(s => !s)}
+                          className="flex-1 flex items-center gap-1.5 text-[9px] font-black text-[#d97706] uppercase tracking-widest hover:opacity-80 transition-opacity text-left">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          {result.unresolved.length} Unresolved Sessions
+                          {showUnresolved ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+                        </button>
+                        <button
+                          onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term')}
+                          className="flex items-center gap-1 px-2 py-1 text-[8px] font-black uppercase tracking-wide text-white hover:opacity-90 transition-opacity shrink-0"
+                          style={{ background: 'linear-gradient(135deg,#d97706,#b45309)' }}
+                          title="Download detailed conflict report as Excel">
+                          <Download className="w-2.5 h-2.5" /> Excel Report
+                        </button>
+                      </div>
+
                       {showUnresolved && (
-                        <table className="w-full text-[9px]">
-                          <thead>
-                            <tr className="border-b-2 border-[#fde68a] bg-[#fef3c7]">
-                              {['Course', 'Faculty', 'Sessions', 'Reason'].map(h => (
-                                <th key={h} className="px-2 py-1.5 text-left font-black text-[#92400e] uppercase tracking-wider">{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-[#fef3c7]">
-                            {result.unresolved.map((u: UnresolvedSession, i: number) => (
-                              <tr key={i} className="hover:bg-[#fffbeb] transition-colors">
-                                <td className="px-2 py-1.5 font-bold text-[#0f172a]">{u.courseCode}<span className="block text-[8px] font-normal text-[#64748b]">{u.courseName}</span></td>
-                                <td className="px-2 py-1.5 text-[#475569]">{u.facultyName}</td>
-                                <td className="px-2 py-1.5 font-black" style={{ color: u.sessionsPlaced === 0 ? '#e11d48' : '#d97706' }}>{u.sessionsPlaced}/{u.sessionsNeeded}</td>
-                                <td className="px-2 py-1.5 text-[#64748b] max-w-[160px] truncate">{u.reason}</td>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[9px]">
+                            <thead>
+                              <tr className="border-b-2 border-[#fde68a] bg-[#fef3c7]">
+                                {['Course', 'Faculty', 'Slots', 'Primary Reason', 'Top Suggestion'].map(h => (
+                                  <th key={h} className="px-2 py-1.5 text-left font-black text-[#92400e] uppercase tracking-wider whitespace-nowrap">{h}</th>
+                                ))}
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody className="divide-y divide-[#fef3c7]">
+                              {result.unresolved.map((u: UnresolvedSession, i: number) => {
+                                const d = u.diagnostics;
+                                const bars = d ? [
+                                  { label: 'Fac', val: d.rejectedByFacultyClash, color: '#e11d48' },
+                                  { label: 'Coh', val: d.rejectedByCohortClash, color: '#7c3aed' },
+                                  { label: 'Con', val: d.rejectedByConsecutiveHours, color: '#0891b2' },
+                                  { label: 'Rm',  val: d.rejectedByFixedRoom, color: '#d97706' },
+                                ].filter(b => b.val > 0) : [];
+                                return (
+                                  <tr key={i} className="hover:bg-[#fffbeb] transition-colors align-top">
+                                    <td className="px-2 py-1.5 font-bold text-[#0f172a] whitespace-nowrap">
+                                      {u.courseCode}
+                                      <span className="block text-[8px] font-normal text-[#64748b]">{u.courseName}</span>
+                                      <span className="text-[8px] font-normal text-[#94a3b8]">{u.category}</span>
+                                    </td>
+                                    <td className="px-2 py-1.5 text-[#475569] whitespace-nowrap">{u.facultyName}</td>
+                                    <td className="px-2 py-1.5 whitespace-nowrap">
+                                      <span className="font-black" style={{ color: u.sessionsPlaced === 0 ? '#e11d48' : '#d97706' }}>
+                                        {u.sessionsPlaced}/{u.sessionsNeeded}
+                                      </span>
+                                      {bars.length > 0 && (
+                                        <div className="flex gap-1 mt-1 flex-wrap">
+                                          {bars.map(b => (
+                                            <span key={b.label} className="text-[7px] font-black px-1 text-white" style={{ background: b.color }}>
+                                              {b.label} {b.val}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-[#92400e] max-w-[160px]">
+                                      <span className="block leading-tight">{u.reason}</span>
+                                      {d && (
+                                        <span className="block text-[8px] text-[#b45309] mt-0.5">
+                                          {d.totalCandidates} candidates checked
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-[#64748b] max-w-[180px]">
+                                      <span className="block leading-tight text-[8px]">
+                                        {d?.suggestions[0] ?? '—'}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
                     </div>
                   )}

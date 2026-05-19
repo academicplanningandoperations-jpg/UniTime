@@ -26,6 +26,17 @@ export interface CourseAssignment {
   lunchStart: number;         // e.g. 13
 }
 
+export interface ConflictDiagnostics {
+  primaryReason: string;
+  totalCandidates: number;
+  rejectedByFacultyClash: number;
+  rejectedByCohortClash: number;
+  rejectedByConsecutiveHours: number;
+  rejectedByFixedRoom: number;
+  noRoomAssigned: number;   // placed successfully but without a room
+  suggestions: string[];
+}
+
 export interface UnresolvedSession {
   courseCode: string;
   courseName: string;
@@ -35,6 +46,7 @@ export interface UnresolvedSession {
   sessionsNeeded: number;
   sessionsPlaced: number;
   reason: string;
+  diagnostics?: ConflictDiagnostics;
 }
 
 export interface SchedulerResult {
@@ -129,6 +141,74 @@ function wouldCreateLongRun(
     }
   }
   return false;
+}
+
+// ─── conflict diagnostics ────────────────────────────────────────────────────
+
+function buildDiagnostics(
+  asgn: CourseAssignment,
+  totalCandidates: number,
+  rejFaculty: number,
+  rejCohort: number,
+  rejConsec: number,
+  rejFixedRoom: number,
+  noRoomAssigned: number,
+  placed: number,
+  needed: number,
+): ConflictDiagnostics {
+  const suggestions: string[] = [];
+
+  const drivers = [
+    { name: 'fixedRoom', val: rejFixedRoom },
+    { name: 'faculty',   val: rejFaculty },
+    { name: 'cohort',    val: rejCohort },
+    { name: 'consec',    val: rejConsec },
+  ].sort((a, b) => b.val - a.val);
+  const top = drivers[0];
+
+  let primaryReason: string;
+
+  if (top.name === 'fixedRoom' && rejFixedRoom > 0) {
+    primaryReason = `Fixed room "${asgn.fixedRoom}" unavailable for all ${rejFixedRoom} attempted slots`;
+    suggestions.push(`Remove FixedRoom and use PreferredRooms="${asgn.fixedRoom}" to allow fallback when it is taken.`);
+    suggestions.push(`Check if "${asgn.fixedRoom}" is over-booked by other courses in the same term.`);
+  } else if (top.name === 'faculty' && rejFaculty > 0) {
+    primaryReason = `${asgn.facultyName} already booked on ${rejFaculty} of ${totalCandidates} candidate slots`;
+    suggestions.push(`${asgn.facultyName} may be overloaded — reduce total credits or extend FacultyTimeStart/End (currently ${asgn.timeStart}:00–${asgn.timeEnd}:00, ${asgn.workingDays}).`);
+    if (asgn.facultyBlockDay || asgn.dayForBlock)
+      suggestions.push(`Block columns (FacultyBlockDay="${asgn.facultyBlockDay}" / Day-For-Block="${asgn.dayForBlock}") are reducing slots — verify they are correct.`);
+  } else if (top.name === 'cohort' && rejCohort > 0) {
+    const list = asgn.cohorts.slice(0, 3).join(', ') + (asgn.cohorts.length > 3 ? '…' : '');
+    primaryReason = `Cohort(s) ${list} fully booked on ${rejCohort} of ${totalCandidates} candidate slots`;
+    suggestions.push(`Cohorts may be over-scheduled — check CohortBlockDay/Time or other courses sharing ${list}.`);
+    if (asgn.cohortBlockDay || asgn.dayForBlock)
+      suggestions.push(`CohortBlockDay="${asgn.cohortBlockDay}" / Day-For-Block="${asgn.dayForBlock}" is further limiting cohort availability.`);
+  } else if (top.name === 'consec' && rejConsec > 0) {
+    primaryReason = `${rejConsec} slots rejected to prevent ${asgn.facultyName} exceeding 2 consecutive teaching hours`;
+    suggestions.push(`Spread ${asgn.facultyName}'s other courses across more days, or extend their working-hour window.`);
+    if (asgn.category === 'Lab')
+      suggestions.push(`Lab needing 4 consecutive hours? Set LabHours=4 to exempt it from the consecutive-hour rule.`);
+  } else if (placed > 0) {
+    primaryReason = `Partial placement — ${placed} of ${needed} sessions placed`;
+    suggestions.push(`${needed - placed} more slot(s) needed. Remaining candidates are blocked by faculty/cohort load.`);
+  } else {
+    primaryReason = `No viable slot in ${asgn.workingDays} ${asgn.timeStart}:00–${asgn.timeEnd}:00 (${totalCandidates} candidates checked)`;
+    suggestions.push(`Widen the scheduling window via FacultyTimeStart/End or switch FacultyWorkingDays.`);
+  }
+
+  if (noRoomAssigned > 0 && !asgn.fixedRoom)
+    suggestions.push(`${noRoomAssigned} sessions placed without a room — add rooms for campus "${asgn.campus}" or specify PreferredRooms.`);
+
+  return {
+    primaryReason,
+    totalCandidates,
+    rejectedByFacultyClash: rejFaculty,
+    rejectedByCohortClash: rejCohort,
+    rejectedByConsecutiveHours: rejConsec,
+    rejectedByFixedRoom: rejFixedRoom,
+    noRoomAssigned,
+    suggestions,
+  };
 }
 
 // ─── main scheduler ──────────────────────────────────────────────────────────
@@ -250,6 +330,7 @@ export async function runAutoScheduler(
     const takenDays = usedDays.get(dayKey)!;
 
     let placed = 0;
+    let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, noRoomAssigned = 0;
     const candidates = shuffle(days.flatMap(day => slots.map(sl => ({ day, ...sl }))));
 
     for (const { day, startTime, endTime } of candidates) {
@@ -258,19 +339,24 @@ export async function runAutoScheduler(
 
       const keys = slotKeys(day, startTime, endTime);
 
-      // Standard clash checks
-      if (faculty && !isFree(facultyOcc, faculty.id, keys)) continue;
-      if (groups.some(g => !isFree(cohortOcc, g.id, keys))) continue;
+      // Standard clash checks — count each rejection reason
+      if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
+      if (groups.some(g => !isFree(cohortOcc, g.id, keys))) { rejCohort++; continue; }
 
       // No 3 consecutive teaching hours for faculty (4-hr labs are exempt)
-      if (!is4HrLab && faculty && wouldCreateLongRun(facultyOcc, faculty.id, day, keys)) continue;
+      if (!is4HrLab && faculty && wouldCreateLongRun(facultyOcc, faculty.id, day, keys)) { rejConsec++; continue; }
 
       // Room selection
       let pickedRoom: Room | undefined;
 
       if (asgn.fixedRoom) {
         const r = findRoom(asgn.fixedRoom);
-        if (r && isFree(roomOcc, r.id, keys)) pickedRoom = r;
+        if (r && isFree(roomOcc, r.id, keys)) {
+          pickedRoom = r;
+        } else {
+          rejFixedRoom++;
+          continue; // fixed room is taken — try next slot
+        }
       } else {
         // Preferred rooms tried first (pipe-separated in CSV)
         const preferredObjs = asgn.preferredRooms
@@ -295,6 +381,8 @@ export async function runAutoScheduler(
 
           pickedRoom = typeMatched.find(r => isFree(roomOcc, r.id, keys))
             ?? campusRooms.find(r => isFree(roomOcc, r.id, keys));
+
+          if (!pickedRoom) noRoomAssigned++; // placed without room — track for report
         }
       }
 
@@ -323,6 +411,11 @@ export async function runAutoScheduler(
     }
 
     if (placed < sessionsNeeded) {
+      const diag = buildDiagnostics(
+        asgn, days.length * slots.length,
+        rejFaculty, rejCohort, rejConsec, rejFixedRoom, noRoomAssigned,
+        placed, sessionsNeeded,
+      );
       unresolved.push({
         courseCode:     asgn.courseCode,
         courseName:     asgn.courseName,
@@ -331,9 +424,8 @@ export async function runAutoScheduler(
         category:       asgn.category,
         sessionsNeeded,
         sessionsPlaced: placed,
-        reason: placed === 0
-          ? 'No slot available — check clashes with existing timetable or constraints'
-          : `Partial: ${placed} of ${sessionsNeeded} placed`,
+        reason:         diag.primaryReason,
+        diagnostics:    diag,
       });
     }
 

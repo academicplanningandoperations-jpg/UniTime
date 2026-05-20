@@ -472,10 +472,10 @@ export class DataService {
         } else if (entry.roomId) roomMap.set(rk, entry.id);
 
         const fk = `${base}-faculty-${entry.facultyId}`;
-        if (facultyMap.has(fk)) {
+        if (entry.facultyId && facultyMap.has(fk)) {
           const facultyName = getName(facultyList, entry.facultyId, `Faculty #${entry.facultyId.slice(-6)}`);
           clashes.push({ type: 'Faculty', message: `Faculty "${facultyName}" has overlapping sessions on ${entry.day} at ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, facultyMap.get(fk)!] });
-        } else facultyMap.set(fk, entry.id);
+        } else if (entry.facultyId) facultyMap.set(fk, entry.id);
 
         for (const gId of (entry.groupIds || [])) {
           const gk = `${base}-cohort-${gId}`;
@@ -486,7 +486,9 @@ export class DataService {
           } else cohortMap.set(gk, entry.id);
         }
 
-        loadTracker.set(`${week}-${entry.facultyId}`, (loadTracker.get(`${week}-${entry.facultyId}`) || 0) + duration);
+        if (entry.facultyId) {
+          loadTracker.set(`${week}-${entry.facultyId}`, (loadTracker.get(`${week}-${entry.facultyId}`) || 0) + duration);
+        }
       }
     }
 

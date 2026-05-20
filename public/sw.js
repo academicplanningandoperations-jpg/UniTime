@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unitime-v6';
+const CACHE_NAME = 'unitime-v7';
 
 // Never cache these — always fetch fresh so icon/manifest updates are instant
 const NEVER_CACHE = [
@@ -69,22 +69,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-First with Network Fallback for all other assets
+  // Network-First for JS/CSS bundles so fresh Vercel deploys always reach users.
+  // Falls back to cache only when completely offline.
   event.respondWith(
     (async () => {
       try {
-        const cachedResponse = await caches.match(event.request);
-        if (cachedResponse && cachedResponse.status === 200) return cachedResponse;
-
         const networkResponse = await fetch(event.request);
         if (networkResponse && networkResponse.status === 200) {
           const cache = await caches.open(CACHE_NAME);
           cache.put(event.request, networkResponse.clone());
         }
         return networkResponse;
-      } catch (error) {
-        console.error('[SW] Fetch failed:', event.request.url, error);
-        return fetch(event.request);
+      } catch {
+        const cachedResponse = await caches.match(event.request);
+        if (cachedResponse) return cachedResponse;
+        console.error('[SW] Fetch failed and no cache:', event.request.url);
+        return new Response('Network error', { status: 503 });
       }
     })()
   );

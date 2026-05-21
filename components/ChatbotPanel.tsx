@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Send, Minimize2, Bot, User, ChevronUp, RotateCcw, Sparkles } from 'lucide-react';
+import { X, Send, Minimize2, Bot, User, ChevronUp, RotateCcw, Sparkles, GripHorizontal } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import type { Course, Faculty, Room, StudentGroup, ScheduleEntry, Clash, Term } from '../types';
 
@@ -36,22 +36,22 @@ const SUGGESTIONS = [
   'Are there any scheduling clashes?',
   'Which rooms are most used?',
   'How do I use the auto-scheduler?',
-  'What cohorts are in the system?',
   'How do I resolve a faculty clash?',
   'What is the CSV format for auto-scheduling?',
+  'What cohorts are in the system?',
 ];
 
-// ── Inline markdown renderer ─────────────────────────────────────────────────
+// ── Markdown renderer ────────────────────────────────────────────────────────
 
 function renderInline(text: string): React.ReactNode[] {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**'))
-      return <strong key={i} className="font-bold text-[#0f172a]">{part.slice(2, -2)}</strong>;
+      return <strong key={i} className="font-semibold text-[#0f172a]">{part.slice(2, -2)}</strong>;
     if (part.startsWith('`') && part.endsWith('`'))
-      return <code key={i} className="bg-[#f1f5f9] px-1 py-0.5 text-[#0891b2] text-[9px] font-mono rounded border border-[#e2e8f0]">{part.slice(1, -1)}</code>;
+      return <code key={i} style={{ background: '#f1f5f9', padding: '1px 5px', color: '#0891b2', fontSize: 12, fontFamily: 'monospace', border: '1px solid #e2e8f0', borderRadius: 3 }}>{part.slice(1, -1)}</code>;
     if (part.startsWith('*') && part.endsWith('*'))
-      return <em key={i} className="italic text-[#475569]">{part.slice(1, -1)}</em>;
+      return <em key={i} style={{ color: '#475569' }}>{part.slice(1, -1)}</em>;
     return <span key={i}>{part}</span>;
   });
 }
@@ -61,32 +61,32 @@ function renderMarkdown(text: string): React.ReactNode {
   const nodes: React.ReactNode[] = [];
   lines.forEach((line, i) => {
     if (line.startsWith('### '))
-      nodes.push(<p key={i} className="text-[11px] font-bold text-[#0f172a] mt-2 mb-0.5">{line.slice(4)}</p>);
+      nodes.push(<p key={i} style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginTop: 8, marginBottom: 2 }}>{line.slice(4)}</p>);
     else if (line.startsWith('## '))
-      nodes.push(<p key={i} className="text-[12px] font-bold text-[#0f172a] mt-2 mb-0.5">{line.slice(3)}</p>);
+      nodes.push(<p key={i} style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 8, marginBottom: 2 }}>{line.slice(3)}</p>);
     else if (line.startsWith('# '))
-      nodes.push(<p key={i} className="text-[13px] font-bold text-[#0f172a] mt-2 mb-1">{line.slice(2)}</p>);
+      nodes.push(<p key={i} style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginTop: 8, marginBottom: 4 }}>{line.slice(2)}</p>);
     else if (line.startsWith('- ') || line.startsWith('* '))
       nodes.push(
-        <div key={i} className="flex gap-1.5 text-[10px] leading-relaxed text-[#334155]">
-          <span className="text-[#185baf] shrink-0 mt-0.5 font-bold">•</span>
+        <div key={i} style={{ display: 'flex', gap: 8, fontSize: 13, lineHeight: 1.6, color: '#334155', marginTop: 2 }}>
+          <span style={{ color: '#185baf', fontWeight: 700, flexShrink: 0, marginTop: 1 }}>•</span>
           <span>{renderInline(line.slice(2))}</span>
         </div>
       );
     else if (/^\d+\.\s/.test(line)) {
       const m = line.match(/^(\d+)\.\s(.*)$/);
       if (m) nodes.push(
-        <div key={i} className="flex gap-1.5 text-[10px] leading-relaxed text-[#334155]">
-          <span className="text-[#185baf] shrink-0 font-bold">{m[1]}.</span>
+        <div key={i} style={{ display: 'flex', gap: 8, fontSize: 13, lineHeight: 1.6, color: '#334155', marginTop: 2 }}>
+          <span style={{ color: '#185baf', fontWeight: 700, flexShrink: 0 }}>{m[1]}.</span>
           <span>{renderInline(m[2])}</span>
         </div>
       );
     } else if (line.trim() === '')
-      nodes.push(<div key={i} className="h-1" />);
+      nodes.push(<div key={i} style={{ height: 6 }} />);
     else
-      nodes.push(<p key={i} className="text-[10px] leading-relaxed text-[#334155]">{renderInline(line)}</p>);
+      nodes.push(<p key={i} style={{ fontSize: 13, lineHeight: 1.65, color: '#334155', marginTop: 2 }}>{renderInline(line)}</p>);
   });
-  return <div className="space-y-0.5">{nodes}</div>;
+  return <div>{nodes}</div>;
 }
 
 // ── System prompt ────────────────────────────────────────────────────────────
@@ -96,12 +96,10 @@ function buildSystemPrompt(
   groups: StudentGroup[], schedule: ScheduleEntry[], clashes: Clash[], activeTerm?: Term
 ): string {
   const termSchedule = activeTerm ? schedule.filter(s => s.termId === activeTerm.id) : schedule;
-
-  const facultyLoad = faculties.slice(0, 40).map(f => {
+  const facultyLoad  = faculties.slice(0, 40).map(f => {
     const n = termSchedule.filter(s => s.facultyId === f.id).length;
     return `${(f as any)._Faculty_name || f.name}(${n}sessions)`;
   }).join(', ');
-
   const roomUsage = rooms.slice(0, 20).map(r => {
     const n = termSchedule.filter(s => s.roomId === r.id).length;
     return `${(r as any)._unique_name || r.name}(${n}bookings)`;
@@ -122,12 +120,14 @@ COHORTS: ${groups.slice(0, 40).map(g => (g as any)._unique_name || g.name).join(
 FACULTY LOAD: ${facultyLoad}
 ROOM USAGE: ${roomUsage}
 
-Help with: timetable questions, faculty workload, room availability, clash resolution, auto-scheduler CSV format, block columns (Day-For-Block, FacultyBlockDay, CohortBlockDay), unresolved session debugging, and general UniTime usage.
-
+Help with: timetable questions, faculty workload, room availability, clash resolution, auto-scheduler CSV format, block columns, unresolved session debugging, and general UniTime usage.
 Be concise, professional, and helpful. Use markdown formatting for clarity.`;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
+
+const WINDOW_W = 480;
+const WINDOW_H = 640;
 
 const ChatbotPanel: React.FC<Props> = ({
   isOpen, onClose, courses, faculties, rooms, groups, schedule, clashes, activeTerm,
@@ -138,6 +138,11 @@ const ChatbotPanel: React.FC<Props> = ({
   const [isLoading, setIsLoading]     = useState(false);
   const [usage, setUsage]             = useState<SessionUsage>({ totalTokens: 0, requestCount: 0 });
   const [error, setError]             = useState('');
+
+  // Drag state
+  const [pos, setPos]       = useState({ x: window.innerWidth - WINDOW_W - 12, y: 42 });
+  const dragging            = useRef(false);
+  const dragOffset          = useRef({ x: 0, y: 0 });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef       = useRef<HTMLTextAreaElement>(null);
@@ -157,6 +162,34 @@ const ChatbotPanel: React.FC<Props> = ({
     if (isOpen && !isMinimized) setTimeout(() => inputRef.current?.focus(), 150);
   }, [isOpen, isMinimized]);
 
+  // Reset position to top-right when re-opened
+  useEffect(() => {
+    if (isOpen) setPos({ x: window.innerWidth - WINDOW_W - 12, y: 42 });
+  }, [isOpen]);
+
+  // ── Drag handlers ──────────────────────────────────────────────────────────
+  const onMouseDown = (e: React.MouseEvent) => {
+    // Only drag on the header bar itself, not buttons inside it
+    if ((e.target as HTMLElement).closest('button')) return;
+    dragging.current = true;
+    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const newX = Math.max(0, Math.min(window.innerWidth  - WINDOW_W, e.clientX - dragOffset.current.x));
+      const newY = Math.max(0, Math.min(window.innerHeight - 60,       e.clientY - dragOffset.current.y));
+      setPos({ x: newX, y: newY });
+    };
+    const onUp = () => { dragging.current = false; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  // ── Send message ───────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading || !aiRef.current) return;
     setError('');
@@ -207,54 +240,70 @@ const ChatbotPanel: React.FC<Props> = ({
 
   if (!isOpen || !apiKey) return null;
 
-  const reqPct    = Math.min(100, (usage.requestCount / DAILY_REQ_LIMIT) * 100);
-  const remaining = Math.max(0, DAILY_REQ_LIMIT - usage.requestCount);
-  const reqColor  = reqPct > 80 ? '#dc2626' : reqPct > 50 ? '#d97706' : '#16a34a';
-  const termScheduleCount = activeTerm ? schedule.filter(s => s.termId === activeTerm.id).length : schedule.length;
+  const reqPct             = Math.min(100, (usage.requestCount / DAILY_REQ_LIMIT) * 100);
+  const remaining          = Math.max(0, DAILY_REQ_LIMIT - usage.requestCount);
+  const reqColor           = reqPct > 80 ? '#dc2626' : reqPct > 50 ? '#d97706' : '#16a34a';
+  const termScheduleCount  = activeTerm ? schedule.filter(s => s.termId === activeTerm.id).length : schedule.length;
 
   return (
     <div
-      className="fixed z-[980] flex flex-col overflow-hidden"
+      className="fixed z-[980] flex flex-col overflow-hidden select-none"
       style={{
-        top: 42,
-        right: 8,
-        width: 420,
-        height: isMinimized ? 'auto' : 580,
+        left: pos.x,
+        top: pos.y,
+        width: WINDOW_W,
+        height: isMinimized ? 'auto' : WINDOW_H,
         background: '#ffffff',
-        border: '1px solid #cbd5e1',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.1)',
+        border: '1px solid #94a3b8',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.12)',
+        userSelect: 'none',
       }}
     >
-      {/* ── Header ── */}
+      {/* ── Header (drag handle) ── */}
       <div
-        className="shrink-0 flex items-center gap-2.5 px-4 py-2.5 border-b border-[#0a2d6e]"
-        style={{ background: 'linear-gradient(180deg, #1e6ad4 0%, #185baf 60%, #124a99 100%)' }}
+        onMouseDown={onMouseDown}
+        className="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-[#0a2d6e]"
+        style={{
+          background: 'linear-gradient(180deg, #1e6ad4 0%, #185baf 60%, #124a99 100%)',
+          cursor: dragging.current ? 'grabbing' : 'grab',
+        }}
       >
-        <div className="w-7 h-7 flex items-center justify-center shrink-0 bg-white/20 border border-white/30">
-          <Sparkles className="w-3.5 h-3.5 text-white" />
+        <GripHorizontal className="w-4 h-4 text-white/40 shrink-0" />
+        <div className="w-8 h-8 flex items-center justify-center shrink-0 bg-white/20 border border-white/30">
+          <Sparkles className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-black text-white uppercase tracking-[0.12em]">UniTime AI Assistant</p>
+          <p style={{ fontSize: 13, fontWeight: 900, color: 'white', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            UniTime AI Assistant
+          </p>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
-            <span className="text-[8px] text-blue-200 font-medium">Gemini 1.5 Flash · Free Tier</span>
+            <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
+            <span style={{ fontSize: 10, color: '#bfdbfe', fontWeight: 500 }}>Gemini 1.5 Flash · Free Tier</span>
           </div>
         </div>
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1">
           {messages.length > 0 && (
-            <button onClick={() => { setMessages([]); setUsage({ totalTokens: 0, requestCount: 0 }); setError(''); }}
+            <button
+              onClick={() => { setMessages([]); setUsage({ totalTokens: 0, requestCount: 0 }); setError(''); }}
               title="Clear chat"
-              className="p-1.5 text-white/60 hover:text-white hover:bg-white/15 transition-all">
-              <RotateCcw className="w-3 h-3" />
+              className="p-2 text-white/60 hover:text-white hover:bg-white/15 transition-all rounded"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           )}
-          <button onClick={() => setIsMinimized(m => !m)} title={isMinimized ? 'Expand' : 'Minimise'}
-            className="p-1.5 text-white/60 hover:text-white hover:bg-white/15 transition-all">
-            {isMinimized ? <ChevronUp className="w-3.5 h-3.5" /> : <Minimize2 className="w-3.5 h-3.5" />}
+          <button
+            onClick={() => setIsMinimized(m => !m)}
+            title={isMinimized ? 'Expand' : 'Minimise'}
+            className="p-2 text-white/60 hover:text-white hover:bg-white/15 transition-all rounded"
+          >
+            {isMinimized ? <ChevronUp className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
           </button>
-          <button onClick={onClose} title="Close"
-            className="p-1.5 text-white/60 hover:text-white hover:bg-white/15 transition-all">
-            <X className="w-3.5 h-3.5" />
+          <button
+            onClick={onClose}
+            title="Close"
+            className="p-2 text-white/60 hover:text-red-300 hover:bg-white/15 transition-all rounded"
+          >
+            <X className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -262,52 +311,60 @@ const ChatbotPanel: React.FC<Props> = ({
       {!isMinimized && (
         <>
           {/* ── Usage bar ── */}
-          <div className="shrink-0 px-4 py-2 border-b border-[#e2e8f0] bg-[#f8fafc]">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[8px] font-black text-[#64748b] uppercase tracking-widest">Daily Quota</span>
-              <span className="text-[8px] font-bold" style={{ color: reqColor }}>
+          <div className="shrink-0 px-4 py-2.5 border-b border-[#e2e8f0] bg-[#f8fafc]">
+            <div className="flex items-center justify-between mb-1.5">
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                Daily Quota
+              </span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: reqColor }}>
                 {remaining.toLocaleString()} requests remaining
               </span>
             </div>
-            <div className="h-1.5 rounded-full overflow-hidden bg-[#e2e8f0]">
+            <div className="h-2 rounded-full overflow-hidden bg-[#e2e8f0]">
               <div
                 className="h-full rounded-full transition-all duration-700"
-                style={{ width: `${reqPct}%`, background: `linear-gradient(90deg, ${reqColor}cc, ${reqColor})` }}
+                style={{ width: `${reqPct}%`, background: `linear-gradient(90deg, ${reqColor}bb, ${reqColor})` }}
               />
             </div>
-            <div className="flex justify-between mt-1">
-              <span className="text-[7px] text-[#94a3b8]">
+            <div className="flex justify-between mt-1.5">
+              <span style={{ fontSize: 10, color: '#94a3b8' }}>
                 {usage.requestCount} used · {usage.totalTokens.toLocaleString()} tokens this session
               </span>
-              <span className="text-[7px] text-[#94a3b8]">1,500 / day free</span>
+              <span style={{ fontSize: 10, color: '#94a3b8' }}>1,500 / day free</span>
             </div>
           </div>
 
           {/* ── Messages ── */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 custom-scrollbar bg-[#f8fafc]">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#f8fafc]" style={{ userSelect: 'text' }}>
 
             {messages.length === 0 && (
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-4">
                 {/* Welcome card */}
-                <div className="bg-white border border-[#e2e8f0] p-3 shadow-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-7 h-7 flex items-center justify-center bg-[#185baf]">
-                      <Sparkles className="w-3.5 h-3.5 text-white" />
+                <div className="bg-white border border-[#e2e8f0] p-4 shadow-sm">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-9 h-9 flex items-center justify-center bg-[#185baf] shrink-0">
+                      <Sparkles className="w-4 h-4 text-white" />
                     </div>
                     <div>
-                      <p className="text-[11px] font-black text-[#0f172a] uppercase tracking-wide">Ask Me Anything</p>
-                      <p className="text-[8px] text-[#64748b]">Context-aware of your live timetable</p>
+                      <p style={{ fontSize: 14, fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        Ask Me Anything
+                      </p>
+                      <p style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                        I have full context of your live timetable
+                      </p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-[#f1f5f9]">
+                  <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[#f1f5f9]">
                     {[
                       { label: 'Faculty', value: faculties.length },
                       { label: 'Rooms', value: rooms.length },
                       { label: 'Sessions', value: termScheduleCount },
                     ].map(s => (
-                      <div key={s.label} className="text-center bg-[#f8fafc] border border-[#e2e8f0] py-1.5">
-                        <p className="text-[14px] font-black text-[#185baf]">{s.value}</p>
-                        <p className="text-[7px] font-bold text-[#64748b] uppercase tracking-wider">{s.label}</p>
+                      <div key={s.label} className="text-center bg-[#f8fafc] border border-[#e2e8f0] py-2">
+                        <p style={{ fontSize: 20, fontWeight: 900, color: '#185baf' }}>{s.value}</p>
+                        <p style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          {s.label}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -315,13 +372,16 @@ const ChatbotPanel: React.FC<Props> = ({
 
                 {/* Suggestions */}
                 <div>
-                  <p className="text-[8px] font-black text-[#94a3b8] uppercase tracking-widest mb-1.5">Suggested Questions</p>
-                  <div className="flex flex-wrap gap-1.5">
+                  <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+                    Suggested Questions
+                  </p>
+                  <div className="flex flex-wrap gap-2">
                     {SUGGESTIONS.map(q => (
                       <button
                         key={q}
                         onClick={() => sendMessage(q)}
-                        className="px-2.5 py-1 text-[9px] font-medium text-[#185baf] bg-white border border-[#bfdbfe] hover:bg-[#eff6ff] hover:border-[#185baf] transition-all text-left leading-tight"
+                        className="px-3 py-1.5 text-left bg-white border border-[#bfdbfe] hover:bg-[#eff6ff] hover:border-[#185baf] transition-all"
+                        style={{ fontSize: 12, color: '#185baf', lineHeight: 1.4 }}
                       >
                         {q}
                       </button>
@@ -332,40 +392,39 @@ const ChatbotPanel: React.FC<Props> = ({
             )}
 
             {messages.map(msg => (
-              <div key={msg.id} className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+              <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                 {/* Avatar */}
                 <div
-                  className="w-6 h-6 shrink-0 flex items-center justify-center mt-0.5"
+                  className="w-8 h-8 shrink-0 flex items-center justify-center mt-0.5"
                   style={{
                     background: msg.role === 'user' ? '#185baf' : '#f1f5f9',
                     border: msg.role === 'assistant' ? '1px solid #e2e8f0' : 'none',
                   }}
                 >
                   {msg.role === 'user'
-                    ? <User className="w-3 h-3 text-white" />
-                    : <Bot className="w-3 h-3 text-[#185baf]" />
+                    ? <User className="w-4 h-4 text-white" />
+                    : <Bot className="w-4 h-4 text-[#185baf]" />
                   }
                 </div>
 
                 {/* Bubble */}
-                <div className={`flex flex-col gap-0.5 max-w-[82%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div className={`flex flex-col gap-1 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div
-                    className="px-3 py-2"
+                    className="px-4 py-3"
                     style={msg.role === 'user' ? {
                       background: 'linear-gradient(135deg, #1e6ad4, #185baf)',
-                      color: 'white',
                     } : {
                       background: '#ffffff',
                       border: '1px solid #e2e8f0',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
                     }}
                   >
                     {msg.role === 'user'
-                      ? <p className="text-[10px] leading-relaxed whitespace-pre-wrap text-white">{msg.content}</p>
+                      ? <p style={{ fontSize: 13, lineHeight: 1.6, color: 'white', whiteSpace: 'pre-wrap' }}>{msg.content}</p>
                       : renderMarkdown(msg.content)
                     }
                   </div>
-                  <span className="text-[7px] text-[#94a3b8] px-1">
+                  <span style={{ fontSize: 10, color: '#94a3b8', padding: '0 4px' }}>
                     {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     {msg.tokens ? ` · ${msg.tokens.toLocaleString()} tokens` : ''}
                   </span>
@@ -375,13 +434,13 @@ const ChatbotPanel: React.FC<Props> = ({
 
             {/* Typing indicator */}
             {isLoading && (
-              <div className="flex gap-2">
-                <div className="w-6 h-6 flex items-center justify-center bg-[#f1f5f9] border border-[#e2e8f0]">
-                  <Bot className="w-3 h-3 text-[#185baf]" />
+              <div className="flex gap-3">
+                <div className="w-8 h-8 flex items-center justify-center bg-[#f1f5f9] border border-[#e2e8f0]">
+                  <Bot className="w-4 h-4 text-[#185baf]" />
                 </div>
-                <div className="px-3 py-3 bg-white border border-[#e2e8f0] flex items-center gap-1 shadow-sm">
+                <div className="px-4 py-3 bg-white border border-[#e2e8f0] flex items-center gap-1.5 shadow-sm">
                   {[0, 1, 2].map(i => (
-                    <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#185baf]"
+                    <div key={i} className="w-2 h-2 rounded-full bg-[#185baf]"
                       style={{ animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }} />
                   ))}
                 </div>
@@ -390,8 +449,8 @@ const ChatbotPanel: React.FC<Props> = ({
 
             {/* Error */}
             {error && (
-              <div className="px-3 py-2 text-[9px] font-medium text-[#dc2626] bg-[#fef2f2] border border-[#fecaca]">
-                ⚠ {error}
+              <div className="px-4 py-3 bg-[#fef2f2] border border-[#fecaca]">
+                <p style={{ fontSize: 12, color: '#dc2626', fontWeight: 500 }}>⚠ {error}</p>
               </div>
             )}
 
@@ -407,22 +466,22 @@ const ChatbotPanel: React.FC<Props> = ({
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Ask about timetable, faculty, rooms, clashes…"
-                rows={1}
+                rows={2}
                 disabled={isLoading}
-                className="flex-1 text-[10px] text-[#0f172a] placeholder-[#94a3b8] px-3 py-2 resize-none border border-[#cbd5e1] focus:outline-none focus:border-[#185baf] transition-colors bg-[#f8fafc] disabled:opacity-50"
-                style={{ maxHeight: 80 }}
+                className="flex-1 resize-none border border-[#cbd5e1] focus:outline-none focus:border-[#185baf] transition-colors bg-[#f8fafc] disabled:opacity-50"
+                style={{ fontSize: 13, color: '#0f172a', padding: '10px 12px', maxHeight: 100 }}
               />
               <button
                 onClick={() => sendMessage(input)}
                 disabled={!input.trim() || isLoading}
-                className="p-2.5 text-white transition-all disabled:opacity-30 hover:opacity-90 active:scale-95 shrink-0"
-                style={{ background: 'linear-gradient(135deg, #1e6ad4, #185baf)' }}
+                className="flex items-center justify-center transition-all disabled:opacity-30 hover:opacity-90 active:scale-95 shrink-0"
+                style={{ background: 'linear-gradient(135deg, #1e6ad4, #185baf)', width: 44, height: 44 }}
               >
-                <Send className="w-3.5 h-3.5" />
+                <Send className="w-4 h-4 text-white" />
               </button>
             </div>
-            <p className="text-[7px] text-[#cbd5e1] mt-1.5">
-              Enter to send · Shift+Enter for new line · Context-aware of your live timetable
+            <p style={{ fontSize: 10, color: '#cbd5e1', marginTop: 6 }}>
+              Enter to send · Shift+Enter for new line · Drag the header to move this window
             </p>
           </div>
         </>

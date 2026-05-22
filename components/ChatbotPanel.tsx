@@ -192,7 +192,14 @@ const ChatbotPanel: React.FC<Props> = ({
   const inputRef       = useRef<HTMLTextAreaElement>(null);
   const aiRef          = useRef<GoogleGenAI | null>(null);
 
-  const apiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+  // Try import.meta.env first (standard Vite — works reliably on Vercel),
+  // then fall back to define-replaced process.env values
+  const apiKey = (
+    (import.meta.env as Record<string, string>).GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.API_KEY ||
+    ''
+  ).trim();
 
   useEffect(() => {
     if (apiKey) aiRef.current = new GoogleGenAI({ apiKey });

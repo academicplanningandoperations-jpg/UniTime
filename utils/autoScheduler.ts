@@ -67,18 +67,29 @@ const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satur
 
 function pad(h: number) { return `${String(h).padStart(2, '0')}:00`; }
 
+// Handles half-hour increments (e.g. 9.5 → "09:30") for MBA/Edge categories
+function padTime(h: number): string {
+  const hh = Math.floor(h);
+  const mm = (h - hh) >= 0.5 ? '30' : '00';
+  return `${String(hh).padStart(2, '0')}:${mm}`;
+}
+
 function buildSlots(start: number, end: number, lunch: number, dur: number) {
   const out: { startTime: string; endTime: string }[] = [];
   for (let h = start; h + dur <= end; h++) {
     if (h < lunch + 1 && h + dur > lunch) continue;
-    out.push({ startTime: pad(h), endTime: pad(h + dur) });
+    out.push({ startTime: padTime(h), endTime: padTime(h + dur) });
   }
   return out;
 }
 
 function slotKeys(day: string, st: string, et: string): string[] {
   const keys: string[] = [];
-  for (let h = parseInt(st); h < parseInt(et); h++) keys.push(`${day}~${pad(h)}`);
+  const startH = parseInt(st);
+  const [etH, etM] = et.split(':').map(Number);
+  // Ceiling: 10:30 occupies hour 10, so endH = 11
+  const endH = etM > 0 ? etH + 1 : etH;
+  for (let h = startH; h < endH; h++) keys.push(`${day}~${pad(h)}`);
   return keys;
 }
 
@@ -177,13 +188,13 @@ function buildDiagnostics(
     primaryReason = `${asgn.facultyName} already booked on ${rejFaculty} of ${totalCandidates} candidate slots`;
     suggestions.push(`${asgn.facultyName} may be overloaded — reduce total credits or extend FacultyTimeStart/End (currently ${asgn.timeStart}:00–${asgn.timeEnd}:00, ${asgn.workingDays}).`);
     if (asgn.facultyBlockDay || asgn.dayForBlock)
-      suggestions.push(`Block columns (FacultyBlockDay="${asgn.facultyBlockDay}" / Day-For-Block="${asgn.dayForBlock}") are reducing slots — verify they are correct.`);
+      suggestions.push(`Block columns (FacultyBlockDay="${asgn.facultyBlockDay}" / Explo-Day-Block="${asgn.dayForBlock}") are reducing slots — verify they are correct.`);
   } else if (top.name === 'cohort' && rejCohort > 0) {
     const list = asgn.cohorts.slice(0, 3).join(', ') + (asgn.cohorts.length > 3 ? '…' : '');
     primaryReason = `Cohort(s) ${list} fully booked on ${rejCohort} of ${totalCandidates} candidate slots`;
     suggestions.push(`Cohorts may be over-scheduled — check CohortBlockDay/Time or other courses sharing ${list}.`);
     if (asgn.cohortBlockDay || asgn.dayForBlock)
-      suggestions.push(`CohortBlockDay="${asgn.cohortBlockDay}" / Day-For-Block="${asgn.dayForBlock}" is further limiting cohort availability.`);
+      suggestions.push(`CohortBlockDay="${asgn.cohortBlockDay}" / Explo-Day-Block="${asgn.dayForBlock}" is further limiting cohort availability.`);
   } else if (top.name === 'consec' && rejConsec > 0) {
     primaryReason = `${rejConsec} slots rejected to prevent ${asgn.facultyName} exceeding 2 consecutive teaching hours`;
     suggestions.push(`Spread ${asgn.facultyName}'s other courses across more days, or extend their working-hour window.`);
@@ -270,7 +281,7 @@ export async function runAutoScheduler(
     const faculty = findFaculty(asgn.facultyId, asgn.facultyName);
     const groups  = asgn.cohorts.map(findGroup).filter(Boolean) as StudentGroup[];
 
-    // Day-For-Block / Time-For-Block — blocks BOTH faculty AND cohorts simultaneously
+    // Explo-Day-Block / Explo-Time-Block — blocks BOTH faculty AND cohorts simultaneously
     if (asgn.dayForBlock.trim() && asgn.timeForBlock.trim()) {
       for (const day of parseDays(asgn.dayForBlock)) {
         for (const hour of parseHours(asgn.timeForBlock)) {
@@ -318,10 +329,16 @@ export async function runAutoScheduler(
 
   for (let ai = 0; ai < sorted.length; ai++) {
     const asgn = sorted[ai];
-    const isLab         = asgn.category.toLowerCase() === 'lab';
-    const duration      = isLab ? (asgn.labHours || 2) : 1;
+    const cat           = asgn.category.toLowerCase();
+    const isLab         = cat === 'lab';
+    const isMBA         = cat === 'mba';   // 1.5-hour sessions; sessionsNeeded = round(credits/1.5)
+    const isEdge        = cat === 'edge';  // 2-hour sessions; sessionsNeeded = round(credits/2)
+    const duration      = isLab ? (asgn.labHours || 2) : isMBA ? 1.5 : isEdge ? 2 : 1;
     const is4HrLab      = isLab && duration >= 4;   // exempt from 3-consecutive-hour rule
-    const sessionsNeeded = asgn.category.toLowerCase() === 'tutorial' ? 1 : asgn.credits;
+    const sessionsNeeded = cat === 'tutorial' ? 1
+      : isMBA  ? Math.round(asgn.credits / 1.5)
+      : isEdge ? Math.round(asgn.credits / 2)
+      : asgn.credits;
     const days  = parseDays(asgn.workingDays).length ? parseDays(asgn.workingDays) : DAYS_MAP['Mon-Fri'];
     const slots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, asgn.lunchStart || 13, duration);
 
@@ -454,7 +471,7 @@ export async function runAutoScheduler(
 // 0:FacultyID  1:FacultyName  2:School  3:CourseCode  4:CourseName  5:Credits  6:Category  7:Campus
 // 8-19: Cohort1-12
 // 20:FixedRoom  21:PreferredRooms  22:LabHours  23:Semester
-// 24:Day-For-Block  25:Time-For-Block  (blocks both faculty AND cohort)
+// 24:Explo-Day-Block  25:Explo-Time-Block  (blocks both faculty AND cohort)
 // 26:FacultyBlockDay  27:FacultyBlockTime  28:CohortBlockDay  29:CohortBlockTime
 // 30:FacultyWorkingDays  31:FacultyTimeStart  32:FacultyTimeEnd  33:CohortLunchStart
 
@@ -486,7 +503,7 @@ const _HDR =
   'FacultyID,FacultyName,School,CourseCode,CourseName,Credits,Category,Campus,' +
   'Cohort1,Cohort2,Cohort3,Cohort4,Cohort5,Cohort6,Cohort7,Cohort8,Cohort9,Cohort10,Cohort11,Cohort12,' +
   'FixedRoom,PreferredRooms,LabHours,Semester,' +
-  'Day-For-Block,Time-For-Block,' +
+  'Explo-Day-Block,Explo-Time-Block,' +
   'FacultyBlockDay,FacultyBlockTime,CohortBlockDay,CohortBlockTime,' +
   'FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart';
 
@@ -512,7 +529,7 @@ export const COURSE_TEMPLATE_CSV = [
     ['DES-Y5-A'], '','','','2',
     '','', '','', '','',
     '','10','18','13'),
-  // Day-For-Block — blocks both faculty AND cohort CS-Y3-A on Tuesday at 10,11
+  // Explo-Day-Block — blocks both faculty AND cohort CS-Y3-A on Tuesday at 10,11
   _row('600001','John Smith','School of Engineering','','','0','','',
     ['CS-Y3-A'], '','','','1',
     'Tuesday','10,11', '','', '','',

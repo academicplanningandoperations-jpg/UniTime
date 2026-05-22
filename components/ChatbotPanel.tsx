@@ -156,7 +156,6 @@ const ChatbotPanel: React.FC<Props> = ({
     return { totalTokens: 0, requestCount: 0 };
   });
   const [error, setError]             = useState('');
-  const [rawError, setRawError]       = useState('');
 
   // Save usage to localStorage whenever it changes
   useEffect(() => {
@@ -264,7 +263,6 @@ const ChatbotPanel: React.FC<Props> = ({
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading || !aiRef.current) return;
     setError('');
-    setRawError('');
     setIsMinimized(false);
 
     const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: text.trim(), timestamp: new Date() };
@@ -294,21 +292,50 @@ const ChatbotPanel: React.FC<Props> = ({
       setUsage(prev => ({ totalTokens: prev.totalTokens + tokenCount, requestCount: prev.requestCount + 1 }));
       setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: responseText, timestamp: new Date(), tokens: tokenCount }]);
     } catch (err: any) {
-      console.error('Google Gen AI API Error:', err);
-      const msg = err?.message || '';
-      setRawError(msg);
-      const msgLower = msg.toLowerCase();
-      if (msgLower.includes('quota') || msgLower.includes('429')) {
-        if (msgLower.includes('minute') || msgLower.includes('rpm') || msgLower.includes('limit') || msgLower.includes('exhausted')) {
-          setError('Rate limit exceeded (Requests per minute). Please wait a minute and try again.');
-        } else {
-          setError('Daily quota exceeded. Free tier: 1,500 requests/day. Try again tomorrow.');
+      const raw = err?.message || '';
+      let friendly = '';
+
+      // Try to parse structured API error JSON embedded in the message
+      try {
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          const apiErr = parsed?.error;
+          if (apiErr) {
+            const code = apiErr.code;
+            const details = apiErr.details || [];
+            const retryInfo = details.find((d: any) => d['@type']?.includes('RetryInfo'));
+            const retryDelay = retryInfo?.retryDelay?.replace('s', '') || '';
+            const quotaViolations = details.find((d: any) => d['@type']?.includes('QuotaFailure'))?.violations || [];
+            const isZeroLimit = quotaViolations.some((v: any) => v.quotaMetric?.includes('free_tier'));
+
+            if (code === 429) {
+              if (isZeroLimit) {
+                friendly = 'Free tier quota unavailable for this API key. This usually means the key belongs to a Google Workspace (university/work) account. Create a new key at aistudio.google.com using a personal Gmail account.';
+              } else if (retryDelay) {
+                friendly = `Rate limit hit. Please wait ${retryDelay} seconds and try again.`;
+              } else {
+                friendly = 'Daily quota exceeded (1,500 req/day on free tier). Try again tomorrow.';
+              }
+            } else if (code === 404) {
+              friendly = 'Gemini model not found. Check the model name or try again later.';
+            } else if (code === 403) {
+              friendly = 'API key invalid or lacks permission. Check GEMINI_API_KEY in Vercel settings.';
+            } else {
+              friendly = `API error (${code}): ${apiErr.message?.split('\n')[0]?.slice(0, 120) || 'Unknown error'}`;
+            }
+          }
         }
-      } else if (msgLower.includes('api key') || msgLower.includes('invalid')) {
-        setError('Invalid API key. Check GEMINI_API_KEY in environment variables.');
-      } else {
-        setError('An error occurred while communicating with the Gemini API.');
+      } catch (_) { /* JSON parse failed, fall through */ }
+
+      if (!friendly) {
+        const lower = raw.toLowerCase();
+        if (lower.includes('quota') || lower.includes('429')) friendly = 'Quota exceeded. Please wait and try again.';
+        else if (lower.includes('api key') || lower.includes('invalid') || lower.includes('403')) friendly = 'Invalid API key. Check GEMINI_API_KEY in Vercel settings.';
+        else friendly = 'Error communicating with Gemini. Please try again.';
       }
+
+      setError(friendly);
     } finally {
       setIsLoading(false);
     }
@@ -390,7 +417,6 @@ const ChatbotPanel: React.FC<Props> = ({
                 setMessages([]);
                 setUsage({ totalTokens: 0, requestCount: 0 });
                 setError('');
-                setRawError('');
               }}
               title="Clear chat"
               className="p-2 text-white/60 hover:text-white hover:bg-white/15 transition-all rounded"
@@ -540,13 +566,8 @@ const ChatbotPanel: React.FC<Props> = ({
 
             {/* Error */}
             {error && (
-              <div className="px-4 py-3 bg-[#fef2f2] border border-[#fecaca] rounded space-y-1">
-                <p style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>⚠ {error}</p>
-                {rawError && rawError !== error && (
-                  <p style={{ fontSize: 10, color: '#991b1b', opacity: 0.8, wordBreak: 'break-word', fontFamily: 'monospace', marginTop: 4 }}>
-                    Details: {rawError}
-                  </p>
-                )}
+              <div className="px-4 py-3 bg-[#fef2f2] border border-[#fecaca]">
+                <p style={{ fontSize: 12, color: '#dc2626', fontWeight: 600, lineHeight: 1.5 }}>⚠ {error}</p>
               </div>
             )}
 

@@ -198,8 +198,6 @@ function buildDiagnostics(
   } else if (top.name === 'consec' && rejConsec > 0) {
     primaryReason = `${rejConsec} slots rejected to prevent ${asgn.facultyName} exceeding 2 consecutive teaching hours`;
     suggestions.push(`Spread ${asgn.facultyName}'s other courses across more days, or extend their working-hour window.`);
-    if (asgn.category === 'Lab')
-      suggestions.push(`Lab needing 4 consecutive hours? Set LabHours=4 to exempt it from the consecutive-hour rule.`);
   } else if (placed > 0) {
     primaryReason = `Partial placement — ${placed} of ${needed} sessions placed`;
     suggestions.push(`${needed - placed} more slot(s) needed. Remaining candidates are blocked by faculty/cohort load.`);
@@ -334,7 +332,6 @@ export async function runAutoScheduler(
     const isMBA         = cat === 'mba';   // 1.5-hour sessions; sessionsNeeded = round(credits/1.5)
     const isEdge        = cat === 'edge';  // 2-hour sessions; sessionsNeeded = round(credits/2)
     const duration      = isLab ? (asgn.labHours || 2) : isMBA ? 1.5 : isEdge ? 2 : 1;
-    const is4HrLab      = isLab && duration >= 4;   // exempt from 3-consecutive-hour rule
     const sessionsNeeded = cat === 'tutorial' ? 1
       : isMBA  ? Math.round(asgn.credits / 1.5)
       : isEdge ? Math.round(asgn.credits / 2)
@@ -365,8 +362,8 @@ export async function runAutoScheduler(
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
       if (groups.some(g => !isFree(cohortOcc, g.id, keys))) { rejCohort++; continue; }
 
-      // No 3 consecutive teaching hours for faculty (4-hr labs are exempt)
-      if (!is4HrLab && faculty && wouldCreateLongRun(facultyOcc, faculty.id, day, keys)) { rejConsec++; continue; }
+      // No 3 consecutive teaching hours for faculty (all labs exempt — they inherently need consecutive slots)
+      if (!isLab && faculty && wouldCreateLongRun(facultyOcc, faculty.id, day, keys)) { rejConsec++; continue; }
 
       // Room selection
       let pickedRoom: Room | undefined;

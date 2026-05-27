@@ -58,6 +58,11 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
     return slicedSchedule.reduce((acc, curr) => acc + DataService.getDuration(curr.startTime, curr.endTime), 0);
   }, [slicedSchedule]);
 
+  const avgLoadPerFaculty = useMemo(() => {
+    const count = slicedFacultyIds.size;
+    return count > 0 ? totalHours / count : 0;
+  }, [totalHours, slicedFacultyIds]);
+
   const dailyData = useMemo(() => {
     const days   = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -106,16 +111,25 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
     return days.map((day, i) => {
       const entry: Record<string, any> = { name: labels[i] };
       let total = 0;
+      let dayHours = 0;
+      const facultiesOnDay = new Set<string>();
       schoolsToShow.forEach(school => {
-        const count = effectiveSchedule.filter(s => {
+        const daySessions = effectiveSchedule.filter(s => {
           const f = faculties?.find(f => f.id === s.facultyId);
           const dept = (f as any)?._deptName || f?.department || 'General';
           return dept === school && s.day === day;
-        }).length;
-        entry[school] = count;
-        total += count;
+        });
+        entry[school] = daySessions.length;
+        total += daySessions.length;
+        daySessions.forEach(s => {
+          dayHours += DataService.getDuration(s.startTime, s.endTime);
+          if (s.facultyId) facultiesOnDay.add(s.facultyId);
+        });
       });
       entry._total = total;
+      entry._avgLoad = facultiesOnDay.size > 0
+        ? Math.round((dayHours / facultiesOnDay.size) * 10) / 10
+        : 0;
       return entry;
     });
   }, [effectiveSchedule, faculties, allSchools, selectedSchool]);
@@ -124,7 +138,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
     { icon: BookOpen,      title: 'Courses',   value: selectedSchool ? slicedCourseIds.size : courses.length,             sub: 'modules',   color: '#6366f1', grad: 'linear-gradient(135deg,#4338ca,#6366f1)', bg: '#eef2ff', border: '#c7d2fe' },
     { icon: MapPin,        title: 'Rooms',     value: selectedSchool ? slicedRoomIds.size   : rooms.length,               sub: 'venues',    color: '#0891b2', grad: 'linear-gradient(135deg,#0e7490,#06b6d4)', bg: '#ecfeff', border: '#a5f3fc' },
     { icon: Calendar,      title: 'Sessions',  value: slicedSchedule.length,                                               sub: 'entries',   color: '#059669', grad: 'linear-gradient(135deg,#047857,#10b981)', bg: '#ecfdf5', border: '#a7f3d0' },
-    { icon: Clock,         title: 'Load',      value: `${Math.round(totalHours)}h`,                                        sub: 'weekly',    color: '#d97706', grad: 'linear-gradient(135deg,#b45309,#f59e0b)', bg: '#fffbeb', border: '#fde68a' },
+    { icon: Clock,         title: 'Avg Load',  value: `${avgLoadPerFaculty.toFixed(1)}h`,                                  sub: 'per faculty', color: '#d97706', grad: 'linear-gradient(135deg,#b45309,#f59e0b)', bg: '#fffbeb', border: '#fde68a' },
     { icon: AlertTriangle, title: 'Clashes',   value: clashes.length,                                                      sub: 'conflicts', color: '#e11d48', grad: 'linear-gradient(135deg,#be123c,#e11d48)', bg: '#fff1f2', border: '#fecdd3' },
   ];
 
@@ -311,11 +325,11 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
             <div className="flex justify-between items-center mb-3 pb-2 border-b border-[#f1f5f9]">
               <div>
                 <h4 className="text-[12px] font-black text-[#0f172a] tracking-tight">
-                  Sessions by Weekday
+                  Avg Load by Weekday
                   {selectedSchool && <span className="ml-2 text-[#185baf] font-medium text-[11px]">— {selectedSchool}</span>}
                 </h4>
                 <p className="text-[9px] text-[#94a3b8] uppercase tracking-widest font-bold mt-0.5">
-                  {selectedSchool ? 'School view' : 'All schools combined'}
+                  {selectedSchool ? 'Avg hrs per faculty · school view' : 'Avg hrs per faculty · all schools'}
                 </p>
               </div>
             </div>
@@ -326,12 +340,12 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8', fontWeight: 600 }} dy={6} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#cbd5e1' }} />
-                    <Tooltip contentStyle={{ fontSize: '11px', fontWeight: 'bold', padding: '6px 10px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(v: any) => [v, 'Sessions']} />
-                    <Bar dataKey="_total" barSize={36} radius={[4, 4, 0, 0]}>
+                    <Tooltip contentStyle={{ fontSize: '11px', fontWeight: 'bold', padding: '6px 10px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(v: any) => [`${v}h`, 'Avg load / faculty']} />
+                    <Bar dataKey="_avgLoad" barSize={36} radius={[4, 4, 0, 0]}>
                       {schoolDayData.map((_, i) => (
                         <Cell key={i} fill={SCHOOL_COLORS[i % SCHOOL_COLORS.length]} />
                       ))}
-                      <LabelList dataKey="_total" position="top" style={{ fontSize: 10, fontWeight: 800, fill: '#475569' }} formatter={(v: number) => v > 0 ? v : ''} />
+                      <LabelList dataKey="_avgLoad" position="top" style={{ fontSize: 10, fontWeight: 800, fill: '#475569' }} formatter={(v: number) => v > 0 ? `${v}h` : ''} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>

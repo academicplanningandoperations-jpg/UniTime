@@ -559,6 +559,17 @@ const AutoSchedulePanel: React.FC<Props> = ({
                     {stage === 'running' ? 'Generating…' : '✓ Complete'}
                   </p>
                   <span className="ml-auto text-[16px] font-black" style={{ color: pct === 100 ? '#059669' : '#4338ca' }}>{pct}%</span>
+                  {/* Always-visible conflict report download — available regardless of unresolved count */}
+                  {result && stage === 'done' && (
+                    <button
+                      onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term')}
+                      className="flex items-center gap-1 px-2 py-1 text-[8px] font-black uppercase tracking-wide text-white hover:opacity-90 transition-opacity shrink-0 ml-2"
+                      style={{ background: result.unresolved.length > 0 ? 'linear-gradient(135deg,#d97706,#b45309)' : 'linear-gradient(135deg,#059669,#047857)' }}
+                      title={result.unresolved.length > 0 ? 'Download conflict report as Excel' : 'Download conflict report (0 conflicts — all sessions placed)'}>
+                      <Download className="w-2.5 h-2.5" />
+                      {result.unresolved.length > 0 ? `${result.unresolved.length} Conflicts` : '✓ No Conflicts'}
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 custom-scrollbar">
@@ -576,7 +587,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                     <div className="grid grid-cols-3 gap-2">
                       {[
                         { icon: CheckCircle, value: result.stats.placed,          label: 'Placed',     bg: '#ecfdf5', border: '#a7f3d0', color: '#059669', grad: 'linear-gradient(135deg,#ecfdf5,#d1fae5)' },
-                        { icon: AlertTriangle, value: result.stats.unresolvedCount, label: 'Unresolved', bg: result.stats.unresolvedCount > 0 ? '#fffbeb' : '#ecfdf5', border: result.stats.unresolvedCount > 0 ? '#fde68a' : '#a7f3d0', color: result.stats.unresolvedCount > 0 ? '#d97706' : '#059669', grad: result.stats.unresolvedCount > 0 ? 'linear-gradient(135deg,#fffbeb,#fef3c7)' : 'linear-gradient(135deg,#ecfdf5,#d1fae5)' },
+                        { icon: AlertTriangle, value: result.unresolved.length, label: 'Unresolved', bg: result.unresolved.length > 0 ? '#fffbeb' : '#ecfdf5', border: result.unresolved.length > 0 ? '#fde68a' : '#a7f3d0', color: result.unresolved.length > 0 ? '#d97706' : '#059669', grad: result.unresolved.length > 0 ? 'linear-gradient(135deg,#fffbeb,#fef3c7)' : 'linear-gradient(135deg,#ecfdf5,#d1fae5)' },
                         { icon: Zap,           value: result.stats.totalSessions,  label: 'Total',      bg: '#eef2ff', border: '#c7d2fe', color: '#4338ca', grad: 'linear-gradient(135deg,#eef2ff,#e0e7ff)' },
                       ].map(({ icon: Icon, value, label: lbl, border, color, grad }) => (
                         <div key={lbl} className="border-2 p-3 text-center" style={{ background: grad, borderColor: border }}>

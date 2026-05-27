@@ -258,8 +258,11 @@ export async function runAutoScheduler(
   const entries: ScheduleEntry[] = [];
   const unresolved: UnresolvedSession[] = [];
 
-  const facultyOcc = new Map<string, Set<string>>();
-  const cohortOcc  = new Map<string, Set<string>>();
+  const facultyOcc         = new Map<string, Set<string>>();
+  const cohortOcc          = new Map<string, Set<string>>();
+  // Slots reserved for Course-Day-Block courses; other courses are blocked here
+  // but the owning course itself bypasses this check (it uses candidateSlots filtering)
+  const cohortReservedOcc  = new Map<string, Set<string>>();
   const roomOcc    = new Map<string, Set<string>>();
   const usedDays   = new Map<string, Set<string>>();
 
@@ -323,6 +326,17 @@ export async function runAutoScheduler(
       for (const day of parseDays(asgn.cohortBlockDay)) {
         for (const hour of parseHours(asgn.cohortBlockTime)) {
           groups.forEach(g => markBusy(cohortOcc, g.id, [`${day}~${pad(hour)}`]));
+        }
+      }
+    }
+
+    // Course-Day-Block / Course-Time-Block — reserve those slots for this course's cohorts.
+    // Other courses treat these as busy (cohortReservedOcc), but the owning course itself
+    // only checks cohortOcc (the regular map), so it is still placeable in its reserved window.
+    if (asgn.courseDayBlock.trim() && asgn.courseTimeBlock.trim() && groups.length > 0) {
+      for (const day of parseDays(asgn.courseDayBlock)) {
+        for (const hour of parseHours(asgn.courseTimeBlock)) {
+          groups.forEach(g => markBusy(cohortReservedOcc, g.id, [`${day}~${pad(hour)}`]));
         }
       }
     }
@@ -391,7 +405,10 @@ export async function runAutoScheduler(
 
       // Standard clash checks — count each rejection reason
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
-      if (groups.some(g => !isFree(cohortOcc, g.id, keys))) { rejCohort++; continue; }
+      // Regular cohort check + reserved-slot check (courses that own the reservation bypass reserved check)
+      const hasReservedConflict = !asgn.courseDayBlock.trim() &&
+        groups.some(g => !isFree(cohortReservedOcc, g.id, keys));
+      if (groups.some(g => !isFree(cohortOcc, g.id, keys)) || hasReservedConflict) { rejCohort++; continue; }
 
       // No 3 consecutive teaching hours for faculty (all labs exempt — they inherently need consecutive slots)
       if (!isLab && faculty && wouldCreateLongRun(facultyOcc, faculty.id, day, keys)) { rejConsec++; continue; }

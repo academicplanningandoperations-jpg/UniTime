@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { MapPin, AlertTriangle, Clock, BookOpen, Database, Calendar, Filter, X, ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
 import {
-  LineChart, Line, BarChart, Bar, Tooltip, XAxis, YAxis, CartesianGrid,
+  AreaChart, Area, LineChart, Line, BarChart, Bar, Tooltip, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer, LabelList, Cell
 } from 'recharts';
 import { Course, Room, StudentGroup, ScheduleEntry, Clash, Term, Faculty } from '../types';
@@ -274,15 +274,21 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
             </div>
             <div className="h-[200px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={dailyData} margin={{ top: 22, right: 20, left: -20, bottom: 0 }}>
+                <AreaChart data={dailyData} margin={{ top: 22, right: 20, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="sessionsGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#185baf" stopOpacity={0.22} />
+                      <stop offset="95%" stopColor="#185baf" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8', fontWeight: 600 }} dy={8} />
                   <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#cbd5e1' }} />
                   <Tooltip contentStyle={{ fontSize: '11px', fontWeight: 'bold', padding: '6px 10px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(v: any) => [v, 'Sessions']} />
-                  <Line type="monotone" dataKey="sessions" stroke="#185baf" strokeWidth={2.5} dot={{ r: 4, fill: '#185baf', strokeWidth: 0 }} activeDot={{ r: 6, fill: '#6366f1' }}>
+                  <Area type="monotone" dataKey="sessions" stroke="#185baf" strokeWidth={2.5} fill="url(#sessionsGrad)" dot={{ r: 4, fill: '#185baf', strokeWidth: 0 }} activeDot={{ r: 6, fill: '#6366f1' }}>
                     <LabelList dataKey="sessions" position="top" style={{ fontSize: 10, fontWeight: 800, fill: '#185baf' }} formatter={(v: number) => v > 0 ? v : ''} />
-                  </Line>
-                </LineChart>
+                  </Area>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           </div>

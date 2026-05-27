@@ -233,17 +233,19 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
       <div className="flex flex-wrap gap-3 mb-4">
         {statCards.map((stat) => (
           <div key={stat.title}
-            className="flex min-w-[160px] flex-1 bg-white shadow-sm border overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 cursor-default"
-            style={{ borderColor: stat.border }}>
-            <div className="w-1.5 shrink-0" style={{ background: stat.grad }} />
-            <div className="w-12 flex items-center justify-center shrink-0" style={{ background: stat.bg }}>
-              <stat.icon className="w-5 h-5" style={{ color: stat.color }} />
-            </div>
-            <div className="p-3 pl-3 flex flex-col justify-center min-w-0">
-              <span className="text-[10px] font-bold tracking-widest uppercase" style={{ color: stat.color }}>{stat.title}</span>
-              <div className="flex items-baseline gap-1.5 mt-0.5">
-                <span className="text-[22px] font-black leading-none" style={{ color: '#0f172a' }}>{stat.value}</span>
-                <span className="text-[10px] text-[#94a3b8]">{stat.sub}</span>
+            className="relative flex min-w-[160px] flex-1 overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-default"
+            style={{ background: stat.grad, boxShadow: '0 2px 10px rgba(0,0,0,0.18)' }}>
+            <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 80% 20%, rgba(255,255,255,0.18) 0%, transparent 65%)' }} />
+            <div className="relative flex w-full p-3.5 gap-3 items-center">
+              <div className="w-11 h-11 flex items-center justify-center shrink-0 rounded-sm" style={{ background: 'rgba(255,255,255,0.2)' }}>
+                <stat.icon className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex flex-col justify-center min-w-0">
+                <span className="text-[10px] font-bold tracking-widest uppercase text-white/80">{stat.title}</span>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-[26px] font-black leading-none text-white">{stat.value}</span>
+                  <span className="text-[10px] text-white/70">{stat.sub}</span>
+                </div>
               </div>
             </div>
           </div>

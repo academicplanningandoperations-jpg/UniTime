@@ -277,8 +277,8 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
                 <AreaChart data={dailyData} margin={{ top: 22, right: 20, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="sessionsGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#185baf" stopOpacity={0.22} />
-                      <stop offset="95%" stopColor="#185baf" stopOpacity={0.02} />
+                      <stop offset="5%" stopColor="#185baf" stopOpacity={0.55} />
+                      <stop offset="95%" stopColor="#185baf" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />

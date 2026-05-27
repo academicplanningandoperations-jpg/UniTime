@@ -19,15 +19,28 @@ interface DashboardProps {
 
 const SCHOOL_COLORS = ['#185baf', '#0891b2', '#059669', '#d97706', '#7c3aed', '#e11d48', '#0d9488', '#ea580c'];
 
+const HEAT_STOPS: [number, number, number][] = [
+  [34,  197, 94],   // green
+  [234, 179, 8],    // yellow
+  [249, 115, 22],   // orange
+  [220, 38,  38],   // red
+];
+
 const heatColor = (val: number, max: number): string => {
   if (max === 0 || val === 0) return '#f1f5f9';
   const t = Math.min(val / max, 1);
-  return `rgb(${Math.round(219 + (24 - 219) * t)},${Math.round(234 + (91 - 234) * t)},${Math.round(254 + (175 - 254) * t)})`;
+  const n = HEAT_STOPS.length - 1;
+  const scaled = t * n;
+  const i = Math.min(Math.floor(scaled), n - 1);
+  const f = scaled - i;
+  const [r1, g1, b1] = HEAT_STOPS[i];
+  const [r2, g2, b2] = HEAT_STOPS[i + 1];
+  return `rgb(${Math.round(r1 + (r2 - r1) * f)},${Math.round(g1 + (g2 - g1) * f)},${Math.round(b1 + (b2 - b1) * f)})`;
 };
 
 const heatTextColor = (val: number, max: number): string => {
   if (max === 0 || val === 0) return '#cbd5e1';
-  return (val / max) > 0.55 ? '#ffffff' : '#1e40af';
+  return (val / max) > 0.3 ? '#ffffff' : '#166534';
 };
 
 const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule, clashes, activeTerm, faculties }) => {

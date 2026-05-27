@@ -16,6 +16,8 @@ export interface CourseAssignment {
   semester: string;           // label only — e.g. "Semester 1"
   dayForBlock: string;        // days to block for BOTH faculty AND cohorts on this row
   timeForBlock: string;       // hours to block for BOTH (e.g. "8,9,14")
+  courseDayBlock: string;     // restrict THIS course to only these days (e.g. "Mon-Wed")
+  courseTimeBlock: string;    // restrict THIS course to only these start hours (e.g. "13,14,15,16")
   facultyBlockDay: string;    // days to block for THIS faculty only
   facultyBlockTime: string;   // hours to block for THIS faculty only  (e.g. "8,9,14")
   cohortBlockDay: string;     // days to block for the cohorts in this row
@@ -112,10 +114,27 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+const SHORT_TO_FULL: Record<string, string> = {
+  Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday',
+  Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday',
+};
+const SHORT_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 function parseDays(s: string): string[] {
   if (!s.trim()) return [];
   if (DAYS_MAP[s.trim()]) return DAYS_MAP[s.trim()];
-  return s.split(',').map(d => d.trim()).filter(d => ALL_DAYS.includes(d));
+  // Short-name range: Mon-Wed → Monday, Tuesday, Wednesday
+  const rangeMatch = s.trim().match(/^([A-Z][a-z]{2})-([A-Z][a-z]{2})$/);
+  if (rangeMatch) {
+    const si = SHORT_ORDER.indexOf(rangeMatch[1]);
+    const ei = SHORT_ORDER.indexOf(rangeMatch[2]);
+    if (si !== -1 && ei !== -1 && si <= ei)
+      return SHORT_ORDER.slice(si, ei + 1).map(d => SHORT_TO_FULL[d]);
+  }
+  return s.split(',').map(d => {
+    const t = d.trim();
+    return SHORT_TO_FULL[t] ?? t;
+  }).filter(d => ALL_DAYS.includes(d));
 }
 
 function parseHours(s: string): number[] {
@@ -348,9 +367,21 @@ export async function runAutoScheduler(
     if (!usedDays.has(dayKey)) usedDays.set(dayKey, new Set());
     const takenDays = usedDays.get(dayKey)!;
 
+    // Course-Day-Block / Course-Time-Block: restrict this course to specific days/start hours
+    let candidateDays = days;
+    if (asgn.courseDayBlock.trim()) {
+      const restricted = parseDays(asgn.courseDayBlock);
+      if (restricted.length > 0) candidateDays = days.filter(d => restricted.includes(d));
+    }
+    let candidateSlots = slots;
+    if (asgn.courseTimeBlock.trim()) {
+      const allowedHours = new Set(parseHours(asgn.courseTimeBlock));
+      candidateSlots = slots.filter(sl => allowedHours.has(parseInt(sl.startTime)));
+    }
+
     let placed = 0;
     let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, noRoomAssigned = 0;
-    const candidates = shuffle(days.flatMap(day => slots.map(sl => ({ day, ...sl }))));
+    const candidates = shuffle(candidateDays.flatMap(day => candidateSlots.map(sl => ({ day, ...sl }))));
 
     for (const { day, startTime, endTime } of candidates) {
       if (placed >= sessionsNeeded) break;
@@ -464,13 +495,14 @@ export async function runAutoScheduler(
 
 // ─── CSV template strings ────────────────────────────────────────────────────
 
-// 34 columns (indices 0-33):
+// 36 columns (indices 0-35):
 // 0:FacultyID  1:FacultyName  2:School  3:CourseCode  4:CourseName  5:Credits  6:Category  7:Campus
 // 8-19: Cohort1-12
 // 20:FixedRoom  21:PreferredRooms  22:LabHours  23:Semester
 // 24:Explo-Day-Block  25:Explo-Time-Block  (blocks both faculty AND cohort)
-// 26:FacultyBlockDay  27:FacultyBlockTime  28:CohortBlockDay  29:CohortBlockTime
-// 30:FacultyWorkingDays  31:FacultyTimeStart  32:FacultyTimeEnd  33:CohortLunchStart
+// 26:Course-Day-Block  27:Course-Time-Block  (restrict this course to specific days/hours only)
+// 28:FacultyBlockDay  29:FacultyBlockTime  30:CohortBlockDay  31:CohortBlockTime
+// 32:FacultyWorkingDays  33:FacultyTimeStart  34:FacultyTimeEnd  35:CohortLunchStart
 
 function _row(
   facultyId: string, facultyName: string, school: string,
@@ -478,6 +510,7 @@ function _row(
   cohorts: string[],
   fixedRoom: string, preferredRooms: string, labHours: string, semester: string,
   dayForBlock: string, timeForBlock: string,
+  courseDayBlock: string, courseTimeBlock: string,
   facultyBlockDay: string, facultyBlockTime: string,
   cohortBlockDay: string, cohortBlockTime: string,
   workingDays: string, timeStart: string, timeEnd: string, lunchStart: string,
@@ -488,6 +521,7 @@ function _row(
     ...c,
     fixedRoom, preferredRooms, labHours, semester,
     dayForBlock, timeForBlock,
+    courseDayBlock, courseTimeBlock,
     facultyBlockDay, facultyBlockTime,
     cohortBlockDay, cohortBlockTime,
     workingDays, timeStart, timeEnd, lunchStart,
@@ -501,6 +535,7 @@ const _HDR =
   'Cohort1,Cohort2,Cohort3,Cohort4,Cohort5,Cohort6,Cohort7,Cohort8,Cohort9,Cohort10,Cohort11,Cohort12,' +
   'FixedRoom,PreferredRooms,LabHours,Semester,' +
   'Explo-Day-Block,Explo-Time-Block,' +
+  'Course-Day-Block,Course-Time-Block,' +
   'FacultyBlockDay,FacultyBlockTime,CohortBlockDay,CohortBlockTime,' +
   'FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart';
 
@@ -509,42 +544,47 @@ export const COURSE_TEMPLATE_CSV = [
   // Theory — 3 sessions/week
   _row('600001','John Smith','School of Engineering','CS301','Data Structures','3','Theory','K1',
     ['CS-Y3-A','CS-Y3-B'], '','','','1',
-    '','', '','', '','',
+    '','', '','', '','', '','',
     'Mon-Fri','8','16','13'),
   // Lab — 2-hour, fixed room
   _row('600002','Jane Doe','School of Engineering','CS401','Lab Practical','2','Lab','K1',
     ['CS-Y4-A'], 'IT201','','2','2',
-    '','', '','', '','',
+    '','', '','', '','', '','',
     'Mon-Fri','8','16','13'),
   // Lab — 4-hour, multiple preferred rooms (use | not comma to avoid Excel issues)
   _row('600005','Dr. Patel','School of Health Sciences','HS501','Clinical Lab','1','Lab','AB',
     ['HS-Y3-A'], '','AB-Lab1|AB-Lab2','4','3',
-    '','', '','', '','',
+    '','', '','', '','', '','',
     'Mon-Fri','8','16','13'),
   // Studio — leave School blank → auto-balanced
   _row('600003','Alice Brown','School of Design','DES501','Design Studio','2','Studio','AB',
     ['DES-Y5-A'], '','','','2',
-    '','', '','', '','',
+    '','', '','', '','', '','',
     '','10','18','13'),
+  // Course-Day-Block + Course-Time-Block: place CS501 ONLY on Mon-Wed between 13:00-16:00
+  _row('600001','John Smith','School of Engineering','CS501','Evening Seminar','2','Theory','K1',
+    ['CS-Y3-A'], '','','','1',
+    '','', 'Mon-Wed','13,14,15,16', '','', '','',
+    'Mon-Fri','8','16','13'),
   // Explo-Day-Block — blocks both faculty AND cohort CS-Y3-A on Tuesday at 10,11
   _row('600001','John Smith','School of Engineering','','','0','','',
     ['CS-Y3-A'], '','','','1',
-    'Tuesday','10,11', '','', '','',
+    'Tuesday','10,11', '','', '','', '','',
     '','8','16','13'),
   // Faculty block — faculty 600001 is unavailable Monday at 9
   _row('600001','John Smith','School of Engineering','','','0','','',
     [], '', '','','1',
-    '','', 'Monday','9', '','',
+    '','', '','', 'Monday','9', '','',
     '','8','16','13'),
   // Cohort block — CS-Y3-A has assembly every Monday at 10:00 and 11:00
   _row('600001','John Smith','School of Engineering','','','0','','',
     ['CS-Y3-A'], '','','','1',
-    '','', '','', 'Monday','10,11',
+    '','', '','', '','', 'Monday','10,11',
     '','8','16','13'),
   // Combined separate — block faculty Friday pm AND cohort Wednesday morning
   _row('600002','Jane Doe','School of Engineering','','','0','','',
     ['CS-Y4-A'], '','','','2',
-    '','', 'Friday','14,15', 'Wednesday','8,9',
+    '','', '','', 'Friday','14,15', 'Wednesday','8,9',
     '','8','16','13'),
 ].join('\n');
 

@@ -159,65 +159,87 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
     if (isMobile || isMaximized) return;
     onFocus?.();
     setResizeDir(dir);
-    resizeStart.current = { 
-      startW: w, 
-      startH: h, 
-      startX: x, 
-      startY: y, 
-      mouseX: e.clientX, 
-      mouseY: e.clientY 
+    resizeStart.current = {
+      startW: w,
+      startH: h,
+      startX: x,
+      startY: y,
+      mouseX: e.clientX,
+      mouseY: e.clientY
     };
     e.stopPropagation(); e.preventDefault();
   };
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (isMaximized) return;
+    onFocus?.();
+    setIsDragging(true);
+    const t = e.touches[0];
+    dragStart.current = { x: t.clientX, y: t.clientY, startX: x, startY: y };
+  };
+
+  const handleResizeTouchStart = (e: React.TouchEvent, dir: string) => {
+    if (isMaximized) return;
+    onFocus?.();
+    setResizeDir(dir);
+    const t = e.touches[0];
+    resizeStart.current = { startW: w, startH: h, startX: x, startY: y, mouseX: t.clientX, mouseY: t.clientY };
+    e.stopPropagation();
+  };
+
   useEffect(() => {
+    const applyMove = (cx: number, cy: number) => {
+      onUpdateGeometry?.({
+        x: Math.max(0, dragStart.current.startX + (cx - dragStart.current.x)),
+        y: Math.max(0, dragStart.current.startY + (cy - dragStart.current.y)),
+      });
+    };
+    const applyResize = (cx: number, cy: number) => {
+      const dx = cx - resizeStart.current.mouseX;
+      const dy = cy - resizeStart.current.mouseY;
+      const geo: any = {};
+      if (resizeDir!.includes('e')) geo.w = Math.max(250, resizeStart.current.startW + dx);
+      if (resizeDir!.includes('s')) geo.h = Math.max(200, resizeStart.current.startH + dy);
+      if (resizeDir!.includes('w')) {
+        const newW = Math.max(250, resizeStart.current.startW - dx);
+        if (newW !== resizeStart.current.startW) { geo.w = newW; geo.x = resizeStart.current.startX + (resizeStart.current.startW - newW); }
+      }
+      if (resizeDir!.includes('n')) {
+        const newH = Math.max(200, resizeStart.current.startH - dy);
+        if (newH !== resizeStart.current.startH) { geo.h = newH; geo.y = resizeStart.current.startY + (resizeStart.current.startH - newH); }
+      }
+      onUpdateGeometry?.(geo);
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        onUpdateGeometry?.({ 
-          x: Math.max(0, dragStart.current.startX + (e.clientX - dragStart.current.x)), 
-          y: Math.max(0, dragStart.current.startY + (e.clientY - dragStart.current.y)) 
-        });
-      }
-      if (resizeDir) {
-        const dx = e.clientX - resizeStart.current.mouseX;
-        const dy = e.clientY - resizeStart.current.mouseY;
-        const geo: any = {};
-
-        if (resizeDir.includes('e')) geo.w = Math.max(250, resizeStart.current.startW + dx);
-        if (resizeDir.includes('s')) geo.h = Math.max(200, resizeStart.current.startH + dy);
-        
-        if (resizeDir.includes('w')) {
-          const newW = Math.max(250, resizeStart.current.startW - dx);
-          if (newW !== resizeStart.current.startW) {
-            geo.w = newW;
-            geo.x = resizeStart.current.startX + (resizeStart.current.startW - newW);
-          }
-        }
-        
-        if (resizeDir.includes('n')) {
-          const newH = Math.max(200, resizeStart.current.startH - dy);
-          if (newH !== resizeStart.current.startH) {
-            geo.h = newH;
-            geo.y = resizeStart.current.startY + (resizeStart.current.startH - newH);
-          }
-        }
-
-        onUpdateGeometry?.(geo);
-      }
+      if (isDragging) applyMove(e.clientX, e.clientY);
+      if (resizeDir) applyResize(e.clientX, e.clientY);
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      if (isDragging) { applyMove(t.clientX, t.clientY); e.preventDefault(); }
+      if (resizeDir) { applyResize(t.clientX, t.clientY); e.preventDefault(); }
     };
     const handleMouseUp = () => { setIsDragging(false); setResizeDir(null); };
-    if (isDragging || resizeDir) { 
-      window.addEventListener('mousemove', handleMouseMove); 
-      window.addEventListener('mouseup', handleMouseUp); 
-      document.body.style.cursor = isDragging ? 'move' : 
+    const handleTouchEnd = () => { setIsDragging(false); setResizeDir(null); };
+
+    if (isDragging || resizeDir) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('touchmove', handleTouchMove, { passive: false });
+      window.addEventListener('touchend', handleTouchEnd);
+      document.body.style.cursor = isDragging ? 'move' :
         resizeDir === 'e' || resizeDir === 'w' ? 'ew-resize' :
         resizeDir === 'n' || resizeDir === 's' ? 'ns-resize' :
         resizeDir === 'nw' || resizeDir === 'se' ? 'nwse-resize' : 'nesw-resize';
     }
-    return () => { 
-      window.removeEventListener('mousemove', handleMouseMove); 
-      window.removeEventListener('mouseup', handleMouseUp); 
-      document.body.style.cursor = 'default'; 
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      document.body.style.cursor = 'default';
     };
   }, [isDragging, resizeDir, onUpdateGeometry]);
 
@@ -296,10 +318,11 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
     >
       {/* Classic Title Bar */}
       <div 
-        onMouseDown={handleMouseDown} 
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
         onDoubleClick={(e) => { e.stopPropagation(); onMaximize?.(); }}
         className={`px-3 py-1.5 flex items-center justify-between cursor-move active:cursor-grabbing border-b text-white ${isMobile ? 'cursor-default' : ''}`}
-        style={{ background: theme.headerGrad, borderColor: `${theme.accent}60` }}
+        style={{ background: theme.headerGrad, borderColor: `${theme.accent}60`, touchAction: 'none' }}
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <Calendar className="text-white w-4 h-4 shrink-0" />
@@ -654,18 +677,18 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
         </div>
       </div>
 
-      {!isMobile && !isMaximized && (
+      {!isMaximized && (
         <>
-          <div onMouseDown={(e) => handleResizeStart(e, 'n')} className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-50" />
-          <div onMouseDown={(e) => handleResizeStart(e, 's')} className="absolute bottom-0 left-0 right-0 h-1 cursor-ns-resize z-50" />
-          <div onMouseDown={(e) => handleResizeStart(e, 'e')} className="absolute top-0 bottom-0 right-0 w-1 cursor-ew-resize z-50" />
-          <div onMouseDown={(e) => handleResizeStart(e, 'w')} className="absolute top-0 bottom-0 left-0 w-1 cursor-ew-resize z-50" />
-          
-          <div onMouseDown={(e) => handleResizeStart(e, 'nw')} className="absolute top-0 left-0 w-4 h-4 cursor-nwse-resize z-[60]" />
-          <div onMouseDown={(e) => handleResizeStart(e, 'ne')} className="absolute top-0 right-0 w-4 h-4 cursor-nesw-resize z-[60]" />
-          <div onMouseDown={(e) => handleResizeStart(e, 'sw')} className="absolute bottom-0 left-0 w-4 h-4 cursor-nesw-resize z-[60]" />
-          <div onMouseDown={(e) => handleResizeStart(e, 'se')} className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize z-[60] flex items-end justify-end p-1">
-             <div className="w-2 h-2 border-r-2 border-b-2 border-[#666]" />
+          <div onMouseDown={(e) => handleResizeStart(e, 'n')} onTouchStart={(e) => handleResizeTouchStart(e, 'n')} className="absolute top-0 left-0 right-0 h-3 cursor-ns-resize z-50" style={{ touchAction: 'none' }} />
+          <div onMouseDown={(e) => handleResizeStart(e, 's')} onTouchStart={(e) => handleResizeTouchStart(e, 's')} className="absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize z-50" style={{ touchAction: 'none' }} />
+          <div onMouseDown={(e) => handleResizeStart(e, 'e')} onTouchStart={(e) => handleResizeTouchStart(e, 'e')} className="absolute top-0 bottom-0 right-0 w-3 cursor-ew-resize z-50" style={{ touchAction: 'none' }} />
+          <div onMouseDown={(e) => handleResizeStart(e, 'w')} onTouchStart={(e) => handleResizeTouchStart(e, 'w')} className="absolute top-0 bottom-0 left-0 w-3 cursor-ew-resize z-50" style={{ touchAction: 'none' }} />
+
+          <div onMouseDown={(e) => handleResizeStart(e, 'nw')} onTouchStart={(e) => handleResizeTouchStart(e, 'nw')} className="absolute top-0 left-0 w-6 h-6 cursor-nwse-resize z-[60]" style={{ touchAction: 'none' }} />
+          <div onMouseDown={(e) => handleResizeStart(e, 'ne')} onTouchStart={(e) => handleResizeTouchStart(e, 'ne')} className="absolute top-0 right-0 w-6 h-6 cursor-nesw-resize z-[60]" style={{ touchAction: 'none' }} />
+          <div onMouseDown={(e) => handleResizeStart(e, 'sw')} onTouchStart={(e) => handleResizeTouchStart(e, 'sw')} className="absolute bottom-0 left-0 w-6 h-6 cursor-nesw-resize z-[60]" style={{ touchAction: 'none' }} />
+          <div onMouseDown={(e) => handleResizeStart(e, 'se')} onTouchStart={(e) => handleResizeTouchStart(e, 'se')} className="absolute bottom-0 right-0 w-10 h-10 cursor-nwse-resize z-[60] flex items-end justify-end p-1.5" style={{ touchAction: 'none' }}>
+            <div className="w-3 h-3 border-r-2 border-b-2 border-[#666] opacity-60" />
           </div>
         </>
       )}

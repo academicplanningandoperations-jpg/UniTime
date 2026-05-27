@@ -19,6 +19,17 @@ interface DashboardProps {
 
 const SCHOOL_COLORS = ['#185baf', '#0891b2', '#059669', '#d97706', '#7c3aed', '#e11d48', '#0d9488', '#ea580c'];
 
+const heatColor = (val: number, max: number): string => {
+  if (max === 0 || val === 0) return '#f1f5f9';
+  const t = Math.min(val / max, 1);
+  return `rgb(${Math.round(219 + (24 - 219) * t)},${Math.round(234 + (91 - 234) * t)},${Math.round(254 + (175 - 254) * t)})`;
+};
+
+const heatTextColor = (val: number, max: number): string => {
+  if (max === 0 || val === 0) return '#cbd5e1';
+  return (val / max) > 0.55 ? '#ffffff' : '#1e40af';
+};
+
 const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule, clashes, activeTerm, faculties }) => {
 
   const [selectedSchool, setSelectedSchool] = useState<string | null>(null);
@@ -133,6 +144,21 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
       return entry;
     });
   }, [effectiveSchedule, faculties, allSchools, selectedSchool]);
+
+  const heatmapData = useMemo(() => {
+    const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+    const grid: Record<string, Record<number, number>> = {};
+    DAYS.forEach(d => { grid[d] = {}; HOURS.forEach(h => { grid[d][h] = 0; }); });
+    slicedSchedule.forEach(s => {
+      const h = parseInt(s.startTime);
+      if (s.day && grid[s.day] !== undefined && h >= 8 && h <= 18) {
+        grid[s.day][h] = (grid[s.day][h] || 0) + 1;
+      }
+    });
+    const maxVal = Math.max(0, ...DAYS.flatMap(d => HOURS.map(h => grid[d][h])));
+    return { days: DAYS, hours: HOURS, grid, maxVal };
+  }, [slicedSchedule]);
 
   const statCards = [
     { icon: BookOpen,      title: 'Courses',   value: selectedSchool ? slicedCourseIds.size : courses.length,             sub: 'modules',   color: '#6366f1', grad: 'linear-gradient(135deg,#4338ca,#6366f1)', bg: '#eef2ff', border: '#c7d2fe' },
@@ -428,6 +454,65 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
           </div>
 
         </div>
+      </div>
+
+      {/* ── Session Intensity Heatmap ────────────────────────────────────────── */}
+      <div className="mt-3 bg-white border border-[#e2e8f0] shadow-sm p-4 hover:shadow-md transition-shadow">
+        <div className="flex flex-wrap justify-between items-center mb-3 pb-2 border-b border-[#f1f5f9] gap-2">
+          <div>
+            <h4 className="text-[12px] font-black text-[#0f172a] tracking-tight">
+              Session Intensity Heatmap
+              {selectedSchool && <span className="ml-2 text-[#185baf] font-medium text-[11px]">— {selectedSchool}</span>}
+            </h4>
+            <p className="text-[9px] text-[#94a3b8] uppercase tracking-widest font-bold mt-0.5">Sessions per day × hour · darker = busier</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-bold text-[#94a3b8] uppercase tracking-widest">Low</span>
+            {[0.12, 0.32, 0.52, 0.72, 0.92].map(t => (
+              <div key={t} className="w-5 h-4 rounded-sm" style={{ background: heatColor(t, 1) }} />
+            ))}
+            <span className="text-[9px] font-bold text-[#94a3b8] uppercase tracking-widest">High</span>
+          </div>
+        </div>
+
+        {heatmapData.maxVal === 0 ? (
+          <div className="h-24 flex flex-col items-center justify-center gap-2">
+            <Calendar className="w-8 h-8 text-[#e2e8f0]" />
+            <p className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider">No session data for selected filters</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <div className="min-w-[520px]">
+              {/* Hour labels */}
+              <div className="flex items-center mb-1.5" style={{ paddingLeft: '72px' }}>
+                {heatmapData.hours.map(h => (
+                  <div key={h} className="flex-1 text-center text-[9px] font-bold text-[#94a3b8] uppercase tracking-wide">
+                    {h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`}
+                  </div>
+                ))}
+              </div>
+              {/* Day rows */}
+              {heatmapData.days.map(day => (
+                <div key={day} className="flex items-center gap-1 mb-1">
+                  <div className="w-[68px] shrink-0 text-[10px] font-bold text-[#475569]">{day.slice(0, 3)}</div>
+                  {heatmapData.hours.map(h => {
+                    const val = heatmapData.grid[day][h];
+                    return (
+                      <div
+                        key={h}
+                        className="flex-1 h-9 flex items-center justify-center text-[11px] font-black rounded-sm transition-all hover:ring-2 hover:ring-[#185baf] hover:ring-offset-1 cursor-default"
+                        style={{ background: heatColor(val, heatmapData.maxVal), color: heatTextColor(val, heatmapData.maxVal) }}
+                        title={`${day} ${h}:00 — ${val} session${val !== 1 ? 's' : ''}`}
+                      >
+                        {val > 0 ? val : ''}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

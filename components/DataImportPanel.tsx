@@ -578,6 +578,60 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     setSelectedIds(new Set());
   };
 
+  const handleDownloadData = () => {
+    if (currentData.length === 0) { alert(`No ${activeTab} data to export.`); return; }
+
+    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+    let headers: string[] = [];
+    let rows: string[][] = [];
+
+    if (activeTab === 'Modules') {
+      headers = ['_module_id', '_unique_name', '_name', '_academic_year', 'Semester'];
+      rows = currentData.map((item: any) => [
+        item._module_id || item.code || '',
+        item._unique_name || item.code || '',
+        item._name || item.name || '',
+        item._academic_year || item.academicYear || '2025',
+        item.Semester || (item.semester ? `SEM-${item.semester}` : 'SEM-1'),
+      ]);
+    } else if (activeTab === 'Faculties') {
+      headers = ['_staff_id', '_Faculty_ID', '_Faculty_name', '_deptName', '_email'];
+      rows = currentData.map((item: any) => [
+        item._staff_id || '',
+        item._Faculty_ID || item.facultyId || '',
+        item._Faculty_name || item.name || '',
+        item._deptName || item.department || '',
+        item._email || item.email || '',
+      ]);
+    } else if (activeTab === 'Rooms') {
+      headers = ['_room_id', '_unique_name', '_name', '_custom1', '_custom2'];
+      rows = currentData.map((item: any) => [
+        item._room_id || '',
+        item._unique_name || item.name || '',
+        item._name || item.name || '',
+        item._custom1 || '',
+        item._custom2 || '',
+      ]);
+    } else if (activeTab === 'Cohorts') {
+      headers = ['_cohort_id', '_unique_name', '_name'];
+      rows = currentData.map((item: any) => [
+        item._cohort_id || '',
+        item._unique_name || item.name || '',
+        item._name || item.name || '',
+      ]);
+    }
+
+    const csv = [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeTab.toLowerCase()}-export-${activeTermName || activeTermId || 'term'}-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const checkboxTh = (
     <th className="px-3 py-2 w-8">
       <input
@@ -970,6 +1024,13 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
                       Delete {selectedIds.size} Selected
                     </button>
                   )}
+                  <button
+                    onClick={handleDownloadData}
+                    disabled={!activeTermId || currentData.length === 0}
+                    className="flex items-center gap-2 py-1.5 px-4 text-xs font-bold border border-[#185baf] text-[#185baf] hover:bg-[#eff6ff] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    <Download className="w-3.5 h-3.5" />
+                    Export CSV
+                  </button>
                   <button onClick={() => { setActiveImportType(activeTab as ImportType); fileInputRef.current?.click(); }}
                     disabled={!activeTermId}
                     className="btn-primary flex items-center gap-2 py-1.5 px-4 text-xs shadow-sm hover:shadow disabled:opacity-40 disabled:cursor-not-allowed">

@@ -34,8 +34,23 @@ function downloadCSV(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+function getErrorCategory(u: UnresolvedSession): string {
+  const d = u.diagnostics;
+  if (!d) return 'No Viable Slot';
+  if (u.sessionsPlaced > 0 && u.sessionsPlaced < u.sessionsNeeded) return 'Partial Placement';
+  const drivers = [
+    { label: 'Fixed Room Unavailable', val: d.rejectedByFixedRoom },
+    { label: 'Faculty Overloaded',     val: d.rejectedByFacultyClash },
+    { label: 'Cohort Overbooked',      val: d.rejectedByCohortClash },
+    { label: 'Teaching Hours Limit',   val: d.rejectedByConsecutiveHours },
+  ].sort((a, b) => b.val - a.val);
+  if (drivers[0].val > 0) return drivers[0].label;
+  return 'No Viable Slot';
+}
+
 function downloadConflictReport(unresolved: UnresolvedSession[], termName: string) {
   const headers = [
+    'Error Category',
     'Course Code', 'Course Name', 'Faculty', 'Cohorts', 'Category',
     'Placed', 'Needed', 'Primary Reason',
     'Faculty Clash Slots', 'Cohort Clash Slots', 'Consecutive Hr Rejections',
@@ -45,6 +60,7 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
   const rows = unresolved.map(u => {
     const d = u.diagnostics;
     return [
+      getErrorCategory(u),
       u.courseCode, u.courseName, u.facultyName,
       u.cohorts.join(', '), u.category,
       u.sessionsPlaced, u.sessionsNeeded,
@@ -58,6 +74,7 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
 
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   ws['!cols'] = [
+    { wch: 22 },
     { wch: 12 }, { wch: 26 }, { wch: 22 }, { wch: 30 }, { wch: 10 },
     { wch: 7 },  { wch: 7 },  { wch: 54 },
     { wch: 16 }, { wch: 16 }, { wch: 20 },

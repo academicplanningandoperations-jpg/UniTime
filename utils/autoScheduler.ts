@@ -259,6 +259,10 @@ export async function runAutoScheduler(
   const unresolved: UnresolvedSession[] = [];
 
   const facultyOcc         = new Map<string, Set<string>>();
+  // Tracks only non-lab hours — used for the consecutive-hours check so that
+  // lab sessions don't consume a faculty's "3 consecutive hours" budget and
+  // block theory sessions in the gap slot immediately after a lab.
+  const facultyNonLabOcc   = new Map<string, Set<string>>();
   const cohortOcc          = new Map<string, Set<string>>();
   // Slots reserved for Course-Day-Block courses; other courses are blocked here
   // but the owning course itself bypasses this check (it uses candidateSlots filtering)
@@ -346,7 +350,7 @@ export async function runAutoScheduler(
   const courseRows = assignments.filter(a => a.courseCode.trim() && a.credits > 0);
   const totalSessions = courseRows.reduce((s, a) => s + a.credits, 0);
 
-  // Longer labs first, then by cohort count (hardest to place → schedule first)
+  // Sort: labs first → longer labs first → Mon-Fri before Tue-Sat (fills Monday before Saturday) → most cohorts first
   const sorted = [...courseRows].sort((a, b) => {
     const al = a.category.toLowerCase() === 'lab' ? 0 : 1;
     const bl = b.category.toLowerCase() === 'lab' ? 0 : 1;
@@ -355,6 +359,9 @@ export async function runAutoScheduler(
       const ah = a.labHours || 2, bh = b.labHours || 2;
       if (ah !== bh) return bh - ah;
     }
+    const aMF = a.workingDays === 'Mon-Fri' ? 0 : 1;
+    const bMF = b.workingDays === 'Mon-Fri' ? 0 : 1;
+    if (aMF !== bMF) return aMF - bMF;
     return b.cohorts.length - a.cohorts.length;
   });
 
@@ -410,8 +417,9 @@ export async function runAutoScheduler(
         groups.some(g => !isFree(cohortReservedOcc, g.id, keys));
       if (groups.some(g => !isFree(cohortOcc, g.id, keys)) || hasReservedConflict) { rejCohort++; continue; }
 
-      // No 3 consecutive teaching hours for faculty (all labs exempt — they inherently need consecutive slots)
-      if (!isLab && faculty && wouldCreateLongRun(facultyOcc, faculty.id, day, keys)) { rejConsec++; continue; }
+      // No 3 consecutive non-lab teaching hours. Lab hours are excluded from this
+      // check so a gap slot immediately after a lab stays usable for theory courses.
+      if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; continue; }
 
       // Room selection
       let pickedRoom: Room | undefined;
@@ -453,7 +461,10 @@ export async function runAutoScheduler(
         }
       }
 
-      if (faculty)    markBusy(facultyOcc, faculty.id, keys);
+      if (faculty) {
+        markBusy(facultyOcc, faculty.id, keys);
+        if (!isLab) markBusy(facultyNonLabOcc, faculty.id, keys);
+      }
       groups.forEach(g => markBusy(cohortOcc, g.id, keys));
       if (pickedRoom) markBusy(roomOcc, pickedRoom.id, keys);
       takenDays.add(day);

@@ -111,43 +111,13 @@ const STEP_GRADS = [
   'linear-gradient(135deg, #d97706, #f59e0b)',
 ];
 
-function balanceWorkingDays(
+function applyDefaultDays(
   assignments: CourseAssignment[],
   fallback: 'Mon-Fri' | 'Tue-Sat',
 ): CourseAssignment[] {
-  // Collect unique faculties per school with their explicit workingDays
-  const schoolMap = new Map<string, Map<string, string>>(); // school -> facultyId -> days | ''
-  for (const a of assignments) {
-    if (!a.facultyId) continue;
-    const school = a.school.trim() || '__default__';
-    if (!schoolMap.has(school)) schoolMap.set(school, new Map());
-    const fac = schoolMap.get(school)!;
-    const existing = fac.get(a.facultyId);
-    const val = (a.workingDays as string).trim();
-    // Explicit value wins over blank; first explicit occurrence wins
-    if (existing === undefined || (existing === '' && val !== '')) fac.set(a.facultyId, val);
-  }
-
-  // Per school, assign blanks to reach 50/50
-  const resolved = new Map<string, 'Mon-Fri' | 'Tue-Sat'>();
-  for (const facMap of schoolMap.values()) {
-    const unset: string[] = [];
-    let mf = 0, ts = 0;
-    for (const [id, days] of facMap) {
-      if (days === 'Mon-Fri') { resolved.set(id, 'Mon-Fri'); mf++; }
-      else if (days === 'Tue-Sat') { resolved.set(id, 'Tue-Sat'); ts++; }
-      else unset.push(id);
-    }
-    for (const id of unset) {
-      const assign: 'Mon-Fri' | 'Tue-Sat' = mf <= ts ? 'Mon-Fri' : 'Tue-Sat';
-      resolved.set(id, assign);
-      if (assign === 'Mon-Fri') mf++; else ts++;
-    }
-  }
-
   return assignments.map(a => ({
     ...a,
-    workingDays: resolved.get(a.facultyId) ?? fallback,
+    workingDays: (a.workingDays as string).trim() || fallback,
   }));
 }
 
@@ -189,7 +159,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
   const schoolReport = useMemo(() => {
     if (!assignments.length) return [];
-    const balanced = balanceWorkingDays(assignments, defDays);
+    const balanced = applyDefaultDays(assignments, defDays);
     const schoolMap = new Map<string, Map<string, 'Mon-Fri' | 'Tue-Sat'>>();
     for (const a of balanced) {
       if (!a.facultyId) continue;
@@ -265,7 +235,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
   const handleGenerate = async () => {
     if (!assignments.length) return;
     setStage('running'); setProgress(0); setLabel('Starting…'); setResult(null);
-    const balanced = balanceWorkingDays(assignments, defDays);
+    const balanced = applyDefaultDays(assignments, defDays);
     const res = await runAutoScheduler(
       balanced, roomCampusMap, courses, faculties, rooms, groups,
       activeTermId || '', getTermWeeks(activeTerm),
@@ -349,7 +319,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </button>
               </div>
               <p className="text-[9px] text-[#4338ca] leading-relaxed bg-[#eef2ff] border border-[#c7d2fe] px-2 py-1.5">
-                <strong>School</strong> column groups faculties for automatic 50/50 Mon-Fri/Tue-Sat roster balancing per school (leave <strong>FacultyWorkingDays</strong> blank to auto-assign). Explicit "Mon-Fri"/"Tue-Sat" is always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt).
+                Leave <strong>FacultyWorkingDays</strong> blank to use the default days set in Step 3. Explicit "Mon-Fri" or "Tue-Sat" values are always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt).
               </p>
             </div>
           </div>
@@ -434,7 +404,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
               <div className="flex items-center gap-2 px-3 py-2 border-b border-[#f1f5f9]" style={{ background: 'linear-gradient(135deg, #ecfeff, #cffafe)' }}>
                 <GraduationCap className="w-3.5 h-3.5 text-[#0891b2]" />
                 <span className="text-[11px] font-black text-[#0f172a] uppercase tracking-wide">School Roster Distribution</span>
-                <span className="text-[9px] text-[#0891b2] ml-1">auto-balanced preview</span>
+                <span className="text-[9px] text-[#0891b2] ml-1">working day distribution</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[9px]">
@@ -451,13 +421,13 @@ const AutoSchedulePanel: React.FC<Props> = ({
                         <td className="px-2 py-1.5 font-bold text-[#0f172a] max-w-[120px] truncate">{row.school}</td>
                         <td className="px-2 py-1.5 font-black text-[#059669]">{row.mf}</td>
                         <td className="px-2 py-1.5">
-                          <span className={`px-1 py-0.5 text-[8px] font-black ${row.mfPct >= 45 && row.mfPct <= 55 ? 'bg-[#d1fae5] text-[#059669]' : 'bg-[#fef3c7] text-[#d97706]'}`}>
+                          <span className="px-1 py-0.5 text-[8px] font-black bg-[#eff6ff] text-[#185baf]">
                             {row.mfPct}%
                           </span>
                         </td>
                         <td className="px-2 py-1.5 font-black text-[#7c3aed]">{row.ts}</td>
                         <td className="px-2 py-1.5">
-                          <span className={`px-1 py-0.5 text-[8px] font-black ${row.tsPct >= 45 && row.tsPct <= 55 ? 'bg-[#d1fae5] text-[#059669]' : 'bg-[#fef3c7] text-[#d97706]'}`}>
+                          <span className="px-1 py-0.5 text-[8px] font-black bg-[#f5f3ff] text-[#7c3aed]">
                             {row.tsPct}%
                           </span>
                         </td>
@@ -468,7 +438,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </table>
               </div>
               <p className="text-[8px] text-[#64748b] px-3 py-1.5 border-t border-[#ecfeff]">
-                Green % = within 45–55% target. Faculty with blank FacultyWorkingDays are auto-assigned to balance each school.
+                Faculty with blank FacultyWorkingDays use the default days selected in Step 3.
               </p>
             </div>
           )}

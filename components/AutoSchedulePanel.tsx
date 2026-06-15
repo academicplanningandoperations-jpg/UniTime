@@ -116,7 +116,7 @@ const COLS: [string, string, string, string, string][] = [
   ['FacultyBlockTime',   '"10" or "8|9|14" (hours)',   '#e11d48', '#fff1f2', '#fecdd3'],
   ['CohortBlockDay',     'Mon / "Mon|Wed" to block',   '#dc2626', '#fff1f2', '#fecdd3'],
   ['CohortBlockTime',    '"10" or "8|9|14" (hours)',   '#dc2626', '#fff1f2', '#fecdd3'],
-  ['FacultyWorkingDays', 'Ignored — all faculty use Step 3 default', '#94a3b8', '#f8fafc', '#e2e8f0'],
+  ['FacultyWorkingDays', 'Mon-Fri or Tue-Sat (blank = Step 3 default)', '#d97706', '#fffbeb', '#fde68a'],
   ['FacultyTimeStart',   '8 or 10 (faculty roster)',   '#64748b', '#f8fafc', '#e2e8f0'],
   ['FacultyTimeEnd',     '16 or 18 (faculty roster)',  '#64748b', '#f8fafc', '#e2e8f0'],
   ['CohortLunchStart',   '12, 13, or 14 (cohort)',     '#64748b', '#f8fafc', '#e2e8f0'],
@@ -132,10 +132,11 @@ function applyDefaultDays(
   assignments: CourseAssignment[],
   fallback: 'Mon-Fri' | 'Tue-Sat',
 ): CourseAssignment[] {
-  // Always use the UI default (Step 3). The FacultyWorkingDays CSV column is
-  // ignored so old CSVs with baked-in Mon-Fri/Tue-Sat values don't re-introduce
-  // the 50/50 split that was removed.
-  return assignments.map(a => ({ ...a, workingDays: fallback }));
+  // Explicit CSV value wins; blank rows use the Step 3 UI default.
+  return assignments.map(a => ({
+    ...a,
+    workingDays: (a.workingDays as string).trim() || fallback,
+  }));
 }
 
 const AutoSchedulePanel: React.FC<Props> = ({
@@ -457,7 +458,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </table>
               </div>
               <p className="text-[8px] text-[#64748b] px-3 py-1.5 border-t border-[#ecfeff]">
-                All faculty use the default days selected in Step 3. FacultyWorkingDays column in CSV is ignored.
+                Explicit Mon-Fri / Tue-Sat in FacultyWorkingDays is respected. Blank rows use the Step 3 default.
               </p>
             </div>
           )}

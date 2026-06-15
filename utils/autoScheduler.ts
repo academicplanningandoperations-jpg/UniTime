@@ -258,17 +258,14 @@ export async function runAutoScheduler(
   const entries: ScheduleEntry[] = [];
   const unresolved: UnresolvedSession[] = [];
 
-  const facultyOcc         = new Map<string, Set<string>>();
+  const facultyOcc       = new Map<string, Set<string>>();
   // Tracks only non-lab hours — used for the consecutive-hours check so that
   // lab sessions don't consume a faculty's "3 consecutive hours" budget and
   // block theory sessions in the gap slot immediately after a lab.
-  const facultyNonLabOcc   = new Map<string, Set<string>>();
-  const cohortOcc          = new Map<string, Set<string>>();
-  // Slots reserved for Course-Day-Block courses; other courses are blocked here
-  // but the owning course itself bypasses this check (it uses candidateSlots filtering)
-  const cohortReservedOcc  = new Map<string, Set<string>>();
-  const roomOcc    = new Map<string, Set<string>>();
-  const usedDays   = new Map<string, Set<string>>();
+  const facultyNonLabOcc = new Map<string, Set<string>>();
+  const cohortOcc        = new Map<string, Set<string>>();
+  const roomOcc          = new Map<string, Set<string>>();
+  const usedDays         = new Map<string, Set<string>>();
 
   const findCourse  = (code: string) =>
     existingCourses.find(c => c.code === code || (c as any)._unique_name === code || c.name === code);
@@ -334,24 +331,24 @@ export async function runAutoScheduler(
       }
     }
 
-    // Course-Day-Block / Course-Time-Block — reserve those slots for this course's cohorts.
-    // Other courses treat these as busy (cohortReservedOcc), but the owning course itself
-    // only checks cohortOcc (the regular map), so it is still placeable in its reserved window.
-    if (asgn.courseDayBlock.trim() && asgn.courseTimeBlock.trim() && groups.length > 0) {
-      for (const day of parseDays(asgn.courseDayBlock)) {
-        for (const hour of parseHours(asgn.courseTimeBlock)) {
-          groups.forEach(g => markBusy(cohortReservedOcc, g.id, [`${day}~${pad(hour)}`]));
-        }
-      }
-    }
   }
 
   // ── Collect schedulable rows: must have courseCode + credits > 0 ─────────
   const courseRows = assignments.filter(a => a.courseCode.trim() && a.credits > 0);
   const totalSessions = courseRows.reduce((s, a) => s + a.credits, 0);
 
-  // Sort: labs first → longer labs first → Mon-Fri before Tue-Sat (fills Monday before Saturday) → most cohorts first
+  // Sort order (most constrained → least constrained):
+  // 1. Course-Day-Block courses first — they have the fewest candidate slots so must
+  //    claim them before other courses fill the cohort's schedule. No pre-reservation
+  //    needed; going first naturally means they only block the slots they actually use.
+  // 2. Labs (long duration, need specific room types)
+  // 3. Longer labs before shorter labs
+  // 4. Mon-Fri before Tue-Sat (fills cohort's Monday before Saturday)
+  // 5. Most cohorts first (shared cohorts are hardest to place)
   const sorted = [...courseRows].sort((a, b) => {
+    const aDB = a.courseDayBlock.trim() ? 0 : 1;
+    const bDB = b.courseDayBlock.trim() ? 0 : 1;
+    if (aDB !== bDB) return aDB - bDB;
     const al = a.category.toLowerCase() === 'lab' ? 0 : 1;
     const bl = b.category.toLowerCase() === 'lab' ? 0 : 1;
     if (al !== bl) return al - bl;
@@ -418,10 +415,7 @@ export async function runAutoScheduler(
 
       // Standard clash checks — count each rejection reason
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
-      // Regular cohort check + reserved-slot check (courses that own the reservation bypass reserved check)
-      const hasReservedConflict = !asgn.courseDayBlock.trim() &&
-        groups.some(g => !isFree(cohortReservedOcc, g.id, keys));
-      if (groups.some(g => !isFree(cohortOcc, g.id, keys)) || hasReservedConflict) { rejCohort++; continue; }
+      if (groups.some(g => !isFree(cohortOcc, g.id, keys))) { rejCohort++; continue; }
 
       // No 3 consecutive non-lab teaching hours. Lab hours are excluded from this
       // check so a gap slot immediately after a lab stays usable for theory courses.

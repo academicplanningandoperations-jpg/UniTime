@@ -42,6 +42,7 @@ export interface ConflictDiagnostics {
 export interface UnresolvedSession {
   courseCode: string;
   courseName: string;
+  facultyId: string;
   facultyName: string;
   cohorts: string[];
   category: string;
@@ -204,8 +205,9 @@ function buildDiagnostics(
     suggestions.push(`Remove FixedRoom and use PreferredRooms="${asgn.fixedRoom}" to allow fallback when it is taken.`);
     suggestions.push(`Check if "${asgn.fixedRoom}" is over-booked by other courses in the same term.`);
   } else if (top.name === 'faculty' && rejFaculty > 0) {
-    primaryReason = `${asgn.facultyName} already booked on ${rejFaculty} of ${totalCandidates} candidate slots`;
-    suggestions.push(`${asgn.facultyName} may be overloaded — reduce total credits or extend FacultyTimeStart/End (currently ${asgn.timeStart}:00–${asgn.timeEnd}:00, ${asgn.workingDays}).`);
+    const facLabel = `${asgn.facultyName} (ID: ${asgn.facultyId})`;
+    primaryReason = `${facLabel} already booked on ${rejFaculty} of ${totalCandidates} candidate slots`;
+    suggestions.push(`${facLabel} may be overloaded — reduce total credits or extend FacultyTimeStart/End (currently ${asgn.timeStart}:00–${asgn.timeEnd}:00, ${asgn.workingDays}).`);
     if (asgn.facultyBlockDay || asgn.dayForBlock)
       suggestions.push(`Block columns (FacultyBlockDay="${asgn.facultyBlockDay}" / Explo-Day-Block="${asgn.dayForBlock}") are reducing slots — verify they are correct.`);
   } else if (top.name === 'cohort' && rejCohort > 0) {
@@ -215,8 +217,9 @@ function buildDiagnostics(
     if (asgn.cohortBlockDay || asgn.dayForBlock)
       suggestions.push(`CohortBlockDay="${asgn.cohortBlockDay}" / Explo-Day-Block="${asgn.dayForBlock}" is further limiting cohort availability.`);
   } else if (top.name === 'consec' && rejConsec > 0) {
-    primaryReason = `${rejConsec} slots rejected to prevent ${asgn.facultyName} exceeding 2 consecutive teaching hours`;
-    suggestions.push(`Spread ${asgn.facultyName}'s other courses across more days, or extend their working-hour window.`);
+    const facLabel = `${asgn.facultyName} (ID: ${asgn.facultyId})`;
+    primaryReason = `${rejConsec} slots rejected to prevent ${facLabel} exceeding 2 consecutive teaching hours`;
+    suggestions.push(`Spread ${facLabel}'s other courses across more days, or extend their working-hour window.`);
   } else if (placed > 0) {
     primaryReason = `Partial placement — ${placed} of ${needed} sessions placed`;
     suggestions.push(`${needed - placed} more slot(s) needed. Remaining candidates are blocked by faculty/cohort load.`);
@@ -271,13 +274,21 @@ export async function runAutoScheduler(
     existingCourses.find(c => c.code === code || (c as any)._unique_name === code || c.name === code);
 
   const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  // ID match always takes priority over name match. Without this, two different
+  // faculty sharing the same name (e.g. two "Rahul Kumar" with different IDs)
+  // would collapse onto whichever one happens to appear first in the array,
+  // silently merging their workloads.
   const findFaculty = (id: string, name: string) => {
+    if (id) {
+      const byId = existingFaculties.find(f =>
+        f.facultyId === id || f.id === id || (f as any)._Faculty_ID === id
+      );
+      if (byId) return byId;
+    }
     const nName = normName(name);
     return existingFaculties.find(f =>
-      f.facultyId === id || f.id === id ||
-      (f as any)._Faculty_ID === id ||
       normName(f.name) === nName ||
-      (f as any)._Faculty_name && normName((f as any)._Faculty_name) === nName
+      ((f as any)._Faculty_name && normName((f as any)._Faculty_name) === nName)
     );
   };
 
@@ -497,6 +508,7 @@ export async function runAutoScheduler(
       unresolved.push({
         courseCode:     asgn.courseCode,
         courseName:     asgn.courseName,
+        facultyId:      asgn.facultyId,
         facultyName:    asgn.facultyName,
         cohorts:        asgn.cohorts,
         category:       asgn.category,

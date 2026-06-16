@@ -51,7 +51,7 @@ function getErrorCategory(u: UnresolvedSession): string {
 function downloadConflictReport(unresolved: UnresolvedSession[], termName: string) {
   const headers = [
     'Error Category',
-    'Course Code', 'Course Name', 'Faculty', 'Cohorts', 'Category',
+    'Course Code', 'Course Name', 'Faculty ID', 'Faculty Name', 'Cohorts', 'Category',
     'Placed', 'Needed', 'Primary Reason',
     'Faculty Clash Slots', 'Cohort Clash Slots', 'Consecutive Hr Rejections',
     'Fixed Room Rejections', 'Placed Without Room', 'Total Candidate Slots',
@@ -61,7 +61,7 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
     const d = u.diagnostics;
     return [
       getErrorCategory(u),
-      u.courseCode, u.courseName, u.facultyName,
+      u.courseCode, u.courseName, u.facultyId, u.facultyName,
       u.cohorts.join(', '), u.category,
       u.sessionsPlaced, u.sessionsNeeded,
       d?.primaryReason ?? u.reason,
@@ -75,7 +75,7 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   ws['!cols'] = [
     { wch: 22 },
-    { wch: 12 }, { wch: 26 }, { wch: 22 }, { wch: 30 }, { wch: 10 },
+    { wch: 12 }, { wch: 26 }, { wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 10 },
     { wch: 7 },  { wch: 7 },  { wch: 54 },
     { wch: 16 }, { wch: 16 }, { wch: 20 },
     { wch: 18 }, { wch: 18 }, { wch: 16 },
@@ -644,7 +644,10 @@ const AutoSchedulePanel: React.FC<Props> = ({
                                       <span className="block text-[8px] font-normal text-[#64748b]">{u.courseName}</span>
                                       <span className="text-[8px] font-normal text-[#94a3b8]">{u.category}</span>
                                     </td>
-                                    <td className="px-2 py-1.5 text-[#475569] whitespace-nowrap">{u.facultyName}</td>
+                                    <td className="px-2 py-1.5 text-[#475569] whitespace-nowrap">
+                                      {u.facultyName}
+                                      <span className="block text-[8px] font-normal text-[#94a3b8]">ID: {u.facultyId}</span>
+                                    </td>
                                     <td className="px-2 py-1.5 whitespace-nowrap">
                                       <span className="font-black" style={{ color: u.sessionsPlaced === 0 ? '#e11d48' : '#d97706' }}>
                                         {u.sessionsPlaced}/{u.sessionsNeeded}

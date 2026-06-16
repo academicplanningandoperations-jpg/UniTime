@@ -373,6 +373,12 @@ export async function runAutoScheduler(
     );
   };
 
+  // roomCampusMap (from the Room-Campus CSV upload) is keyed by trimmed-but-
+  // not-lowercased RoomName. Rebuild with normalized keys so a Room entity name
+  // that differs slightly in case/whitespace still resolves to its campus.
+  const normRoomCampusMap = new Map<string, string>();
+  roomCampusMap.forEach((campus, name) => normRoomCampusMap.set(normName(name), campus));
+
   // ── Pre-populate occupancy from already-saved timetable entries ────────────
   // This lets incremental uploads respect sessions from previous runs.
   for (const entry of existingSchedule) {
@@ -520,8 +526,13 @@ export async function runAutoScheduler(
       if (fromPreferred) return fromPreferred;
 
       const campusRooms = existingRooms.filter(r => {
-        const campus = roomCampusMap.get(r.name) ?? roomCampusMap.get((r as any)._unique_name ?? '') ?? '';
-        return !asgn.campus || campus === asgn.campus;
+        if (!asgn.campus.trim()) return true; // no campus requirement on this row
+        const mappedCampus = normRoomCampusMap.get(normName(r.name)) ?? normRoomCampusMap.get(normName((r as any)._unique_name ?? ''));
+        // A room with no campus mapping at all (missing/mismatched Room-Campus
+        // upload) is kept as a candidate rather than silently excluded — better
+        // to risk a cross-campus room than to starve the pool down to zero.
+        if (!mappedCampus) return true;
+        return normName(mappedCampus) === normName(asgn.campus);
       });
       const typeMatched = campusRooms.filter(r => {
         const t = (r.type || '').toLowerCase();

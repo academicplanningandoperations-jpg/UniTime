@@ -320,18 +320,30 @@ export async function runAutoScheduler(
   const roomOcc          = new Map<string, Set<string>>();
   const usedDays         = new Map<string, Set<string>>();
 
-  const findCourse  = (code: string) =>
-    existingCourses.find(c => c.code === code || (c as any)._unique_name === code || c.name === code);
-
   const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const normId   = (s: string) => s.trim().toLowerCase();
+
+  // Case-insensitive, whitespace-tolerant match — same pattern as findRoom/findGroup.
+  const findCourse = (code: string) => {
+    const nCode = normName(code);
+    return existingCourses.find(c =>
+      c.code === code || (c as any)._unique_name === code || c.name === code ||
+      normName(c.code ?? '') === nCode || normName((c as any)._unique_name ?? '') === nCode || normName(c.name ?? '') === nCode
+    );
+  };
   // ID match always takes priority over name match. Without this, two different
   // faculty sharing the same name (e.g. two "Rahul Kumar" with different IDs)
   // would collapse onto whichever one happens to appear first in the array,
-  // silently merging their workloads.
+  // silently merging their workloads. ID comparison is normalized (trim +
+  // lowercase) so a CSV value like " 600001" or "ABC-01" with different casing
+  // still resolves — an exact-match-only ID check was silently dropping faculty
+  // (and showing blank in the timetable) whenever case/whitespace differed.
   const findFaculty = (id: string, name: string) => {
     if (id) {
+      const nId = normId(id);
       const byId = existingFaculties.find(f =>
-        f.facultyId === id || f.id === id || (f as any)._Faculty_ID === id
+        normId(f.facultyId ?? '') === nId || normId(f.id ?? '') === nId ||
+        normId((f as any)._Faculty_ID ?? '') === nId
       );
       if (byId) return byId;
     }
@@ -342,8 +354,14 @@ export async function runAutoScheduler(
     );
   };
 
-  const findGroup = (name: string) =>
-    existingGroups.find(g => g.name === name || (g as any)._unique_name === name);
+  // Case-insensitive, whitespace-tolerant match — same pattern as findRoom.
+  const findGroup = (name: string) => {
+    const nName = normName(name);
+    return existingGroups.find(g =>
+      g.name === name || (g as any)._unique_name === name ||
+      normName(g.name) === nName || normName((g as any)._unique_name ?? '') === nName
+    );
+  };
 
   // Case-insensitive, whitespace-tolerant match — a CSV room name like "k1007"
   // or " K1007 " must still resolve to the room named "K1007" in the system.

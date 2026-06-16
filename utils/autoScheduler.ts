@@ -177,6 +177,20 @@ function parseLunchRange(s: string, fallback: number): number[] {
   return !isNaN(n) ? [n] : [fallback];
 }
 
+// True if any of the given cohorts already has a session on this day.
+// Used to cluster a course's sessions onto days the cohort already attends,
+// instead of scattering a single isolated class onto an otherwise-empty day
+// (forcing the whole batch in for just one hour).
+function cohortActiveOnDay(cohortOcc: Map<string, Set<string>>, groupIds: string[], day: string): boolean {
+  const prefix = `${day}~`;
+  return groupIds.some(gid => {
+    const s = cohortOcc.get(gid);
+    if (!s) return false;
+    for (const k of s) if (k.startsWith(prefix)) return true;
+    return false;
+  });
+}
+
 // Returns true if adding newKeys for entityId on the given day would create
 // a run of 3 or more consecutive occupied hours.
 function wouldCreateLongRun(
@@ -454,7 +468,7 @@ export async function runAutoScheduler(
 
     let placed = 0;
     let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, noRoomAssigned = 0;
-    const candidates = shuffle(candidateDays.flatMap(day => {
+    const rawCandidates = candidateDays.flatMap(day => {
       const lunch = dayLunchMap.get(day) ?? 13;
       let daySlots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, lunch, duration);
       if (allowedHours) daySlots = daySlots.filter(sl => allowedHours.has(parseInt(sl.startTime)));
@@ -463,7 +477,14 @@ export async function runAutoScheduler(
       // odd-hour fragments, allowing a faculty to reach 30h without slot waste.
       if (isLab && !asgn.courseTimeBlock.trim()) daySlots = daySlots.filter(sl => parseInt(sl.startTime) % 2 === 0);
       return daySlots.map(sl => ({ day, ...sl }));
-    }));
+    });
+    // Prefer days the cohort already attends — clusters sessions instead of
+    // scattering a single isolated class onto an otherwise day-off, which would
+    // force the whole batch in just for that one hour. Only spills onto a fresh
+    // day once every clustered option is exhausted.
+    const clustered = shuffle(rawCandidates.filter(c => cohortActiveOnDay(cohortOcc, groupIds, c.day)));
+    const fresh = shuffle(rawCandidates.filter(c => !cohortActiveOnDay(cohortOcc, groupIds, c.day)));
+    const candidates = [...clustered, ...fresh];
 
     // Candidates that passed faculty/cohort/consecutive-hours checks but had no
     // room available AT THAT SPECIFIC slot. Saved instead of committed immediately,

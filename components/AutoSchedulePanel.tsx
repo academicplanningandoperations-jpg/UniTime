@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { Download, Upload, Zap, CheckCircle, AlertTriangle, FileText, X, ChevronDown, ChevronUp, MapPin, Clock, Coffee, Calendar, GraduationCap } from 'lucide-react';
+import { Download, Upload, Zap, CheckCircle, AlertTriangle, FileText, X, ChevronDown, ChevronUp, MapPin, Clock, Coffee, Calendar, GraduationCap, DoorOpen } from 'lucide-react';
 import type { Course, Faculty, Room, StudentGroup, ScheduleEntry, Term, UserAccount } from '../types';
 import {
   runAutoScheduler,
@@ -9,6 +9,7 @@ import {
   ROOM_CAMPUS_TEMPLATE_CSV,
   type CourseAssignment,
   type UnresolvedSession,
+  type RoomlessSession,
   type SchedulerResult,
 } from '../utils/autoScheduler';
 
@@ -48,7 +49,7 @@ function getErrorCategory(u: UnresolvedSession): string {
   return 'No Viable Slot';
 }
 
-function downloadConflictReport(unresolved: UnresolvedSession[], termName: string) {
+function downloadConflictReport(unresolved: UnresolvedSession[], termName: string, roomless: RoomlessSession[] = []) {
   const headers = [
     'Error Category',
     'Course Code', 'Course Name', 'Faculty ID', 'Faculty Name', 'Cohorts', 'Category',
@@ -83,6 +84,19 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Conflict Report');
+
+  // Second sheet: sessions that WERE placed (day/time/faculty/cohort all resolved)
+  // but no room could be matched — these show as "TBD" in the Timetable Builder.
+  const roomHeaders = ['Course Code', 'Course Name', 'Faculty ID', 'Faculty Name', 'Cohorts', 'Day', 'Start', 'End'];
+  const roomRows = roomless.map(r => [
+    r.courseCode, r.courseName, r.facultyId, r.facultyName, r.cohorts.join(', '), r.day, r.startTime, r.endTime,
+  ]);
+  const wsRoom = XLSX.utils.aoa_to_sheet([roomHeaders, ...roomRows]);
+  wsRoom['!cols'] = [
+    { wch: 12 }, { wch: 26 }, { wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 12 }, { wch: 8 }, { wch: 8 },
+  ];
+  XLSX.utils.book_append_sheet(wb, wsRoom, 'Sessions Without Room');
+
   const date = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `conflict_report_${termName.replace(/\s+/g, '_')}_${date}.xlsx`);
 }
@@ -160,6 +174,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
   const [label,          setLabel]         = useState('');
   const [result,         setResult]        = useState<SchedulerResult | null>(null);
   const [showUnresolved, setShowUnresolved] = useState(false);
+  const [showRoomless, setShowRoomless] = useState(false);
   const [applying,       setApplying]      = useState(false);
   const [isApplied,      setIsApplied]     = useState(false);
 
@@ -552,10 +567,10 @@ const AutoSchedulePanel: React.FC<Props> = ({
                   {/* Conflict report icon — always visible in status bar after completion */}
                   {result && stage === 'done' && (
                     <button
-                      onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term')}
+                      onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless)}
                       className="w-6 h-6 flex items-center justify-center shrink-0 ml-1 hover:opacity-80 transition-opacity"
-                      style={{ background: result.unresolved.length > 0 ? 'linear-gradient(135deg,#d97706,#b45309)' : 'linear-gradient(135deg,#059669,#047857)' }}
-                      title={result.unresolved.length > 0 ? `Download conflict report (${result.unresolved.length} unresolved)` : 'Download report — all sessions placed successfully'}>
+                      style={{ background: (result.unresolved.length > 0 || result.roomless.length > 0) ? 'linear-gradient(135deg,#d97706,#b45309)' : 'linear-gradient(135deg,#059669,#047857)' }}
+                      title={result.unresolved.length > 0 || result.roomless.length > 0 ? `Download conflict report (${result.unresolved.length} unresolved, ${result.roomless.length} without room)` : 'Download report — all sessions placed successfully'}>
                       <Download className="w-3 h-3 text-white" />
                     </button>
                   )}
@@ -612,7 +627,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                       </button>
                       {/* Download button — full width so it's always visible */}
                       <button
-                        onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term')}
+                        onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless)}
                         className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:opacity-90 transition-opacity"
                         style={{ background: 'linear-gradient(135deg,#d97706,#b45309)' }}>
                         <Download className="w-3.5 h-3.5" /> Download Conflict Report (Excel)
@@ -678,6 +693,57 @@ const AutoSchedulePanel: React.FC<Props> = ({
                                   </tr>
                                 );
                               })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Sessions placed but without a room — shows as TBD in Timetable Builder */}
+                  {result && result.roomless.length > 0 && (
+                    <div className="border-2 border-[#fecaca] overflow-hidden">
+                      <button
+                        onClick={() => setShowRoomless(s => !s)}
+                        className="w-full flex items-center gap-1.5 px-3 py-2 text-[9px] font-black text-[#b91c1c] uppercase tracking-widest hover:opacity-80 transition-opacity text-left"
+                        style={{ background: 'linear-gradient(135deg,#fff1f2,#fee2e2)' }}>
+                        <DoorOpen className="w-3 h-3 shrink-0" />
+                        <span className="flex-1">{result.roomless.length} Sessions Placed Without a Room (TBD)</span>
+                        {showRoomless ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
+                      </button>
+                      <button
+                        onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless)}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:opacity-90 transition-opacity"
+                        style={{ background: 'linear-gradient(135deg,#dc2626,#991b1b)' }}>
+                        <Download className="w-3.5 h-3.5" /> Download Report (includes "Sessions Without Room" sheet)
+                      </button>
+
+                      {showRoomless && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[9px]">
+                            <thead>
+                              <tr className="border-b-2 border-[#fecaca] bg-[#fee2e2]">
+                                {['Course', 'Faculty', 'Cohorts', 'Day', 'Time'].map(h => (
+                                  <th key={h} className="px-2 py-1.5 text-left font-black text-[#991b1b] uppercase tracking-wider whitespace-nowrap">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#fee2e2]">
+                              {result.roomless.map((r: RoomlessSession, i: number) => (
+                                <tr key={i} className="hover:bg-[#fff1f2] transition-colors align-top">
+                                  <td className="px-2 py-1.5 font-bold text-[#0f172a] whitespace-nowrap">
+                                    {r.courseCode}
+                                    <span className="block text-[8px] font-normal text-[#64748b]">{r.courseName}</span>
+                                  </td>
+                                  <td className="px-2 py-1.5 text-[#475569] whitespace-nowrap">
+                                    {r.facultyName}
+                                    <span className="block text-[8px] font-normal text-[#94a3b8]">ID: {r.facultyId}</span>
+                                  </td>
+                                  <td className="px-2 py-1.5 text-[#475569]">{r.cohorts.join(', ')}</td>
+                                  <td className="px-2 py-1.5 text-[#475569] whitespace-nowrap">{r.day}</td>
+                                  <td className="px-2 py-1.5 text-[#475569] whitespace-nowrap">{r.startTime}–{r.endTime}</td>
+                                </tr>
+                              ))}
                             </tbody>
                           </table>
                         </div>

@@ -52,9 +52,23 @@ export interface UnresolvedSession {
   diagnostics?: ConflictDiagnostics;
 }
 
+// A session that was placed successfully (day/time/faculty/cohort all resolved)
+// but no room could be assigned — shows as "TBD" in the Timetable Builder.
+export interface RoomlessSession {
+  courseCode: string;
+  courseName: string;
+  facultyId: string;
+  facultyName: string;
+  cohorts: string[];
+  day: string;
+  startTime: string;
+  endTime: string;
+}
+
 export interface SchedulerResult {
   entries: ScheduleEntry[];
   unresolved: UnresolvedSession[];
+  roomless: RoomlessSession[];
   stats: { totalSessions: number; placed: number; unresolvedCount: number };
 }
 
@@ -281,6 +295,7 @@ export async function runAutoScheduler(
 
   const entries: ScheduleEntry[] = [];
   const unresolved: UnresolvedSession[] = [];
+  const roomless: RoomlessSession[] = [];
 
   const facultyOcc       = new Map<string, Set<string>>();
   // Tracks only non-lab hours — used for the consecutive-hours check so that
@@ -316,8 +331,15 @@ export async function runAutoScheduler(
   const findGroup = (name: string) =>
     existingGroups.find(g => g.name === name || (g as any)._unique_name === name);
 
-  const findRoom = (name: string) =>
-    existingRooms.find(r => r.name === name || (r as any)._unique_name === name);
+  // Case-insensitive, whitespace-tolerant match — a CSV room name like "k1007"
+  // or " K1007 " must still resolve to the room named "K1007" in the system.
+  const findRoom = (name: string) => {
+    const nName = normName(name);
+    return existingRooms.find(r =>
+      r.name === name || (r as any)._unique_name === name ||
+      normName(r.name) === nName || normName((r as any)._unique_name ?? '') === nName
+    );
+  };
 
   // ── Pre-populate occupancy from already-saved timetable entries ────────────
   // This lets incremental uploads respect sessions from previous runs.
@@ -520,6 +542,14 @@ export async function runAutoScheduler(
         category:     asgn.category,
       } as ScheduleEntry);
 
+      if (!pickedRoom) {
+        roomless.push({
+          courseCode: asgn.courseCode, courseName: asgn.courseName,
+          facultyId: asgn.facultyId, facultyName: asgn.facultyName,
+          cohorts: asgn.cohorts, day, startTime, endTime,
+        });
+      }
+
       placed++;
       onProgress(entries.length, totalSessions, `${asgn.courseCode} · ${asgn.cohorts[0] ?? ''}`);
     }
@@ -550,6 +580,7 @@ export async function runAutoScheduler(
   return {
     entries,
     unresolved,
+    roomless,
     stats: {
       totalSessions,
       placed: entries.length,

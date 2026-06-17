@@ -164,8 +164,14 @@ function parseLunchRange(s: string, fallback: number): number[] {
   const t = s.trim();
   if (!t) return [fallback];
 
-  // Try standard formats like "12-14", "12 to 14", "12,14", "12:14"
-  const rangeMatch = t.match(/^(\d{1,2})\s*[-to,:]+\s*(\d{1,2})$/i);
+  // Try explicit comma separated lists like "12,13,14" or "12, 14"
+  if (t.includes(',')) {
+    const parts = t.split(',').map(p => parseInt(p.trim(), 10)).filter(n => !isNaN(n));
+    if (parts.length > 0) return parts;
+  }
+
+  // Try standard formats like "12-14", "12 to 14", "12:14"
+  const rangeMatch = t.match(/^(\d{1,2})\s*[-to:]+\s*(\d{1,2})$/i);
   if (rangeMatch) {
     const start = parseInt(rangeMatch[1], 10);
     const end = parseInt(rangeMatch[2], 10);

@@ -144,7 +144,7 @@ const STEP_GRADS = [
 
 function applyDefaultDays(
   assignments: CourseAssignment[],
-  fallback: 'Mon-Fri' | 'Tue-Sat',
+  fallback: string,
 ): CourseAssignment[] {
   // Explicit CSV value wins; blank rows use the Step 3 UI default.
   return assignments.map(a => ({
@@ -164,9 +164,9 @@ const AutoSchedulePanel: React.FC<Props> = ({
   const [roomCampusMap,  setRoomCampusMap]  = useState<Map<string, string>>(new Map());
   const [parseError,     setParseError]     = useState('');
 
-  const [defDays,  setDefDays]  = useState<'Mon-Fri' | 'Tue-Sat'>('Mon-Fri');
-  const [defStart, setDefStart] = useState<8 | 10>(8);
-  const [defEnd,   setDefEnd]   = useState<16 | 18>(16);
+  const [defDays,  setDefDays]  = useState<string>('Mon-Sat');
+  const [defStart, setDefStart] = useState<number>(8);
+  const [defEnd,   setDefEnd]   = useState<number>(18);
   const [defLunch, setDefLunch] = useState<12 | 13 | 14>(13);
 
   const [stage,          setStage]         = useState<Stage>('idle');
@@ -190,26 +190,6 @@ const AutoSchedulePanel: React.FC<Props> = ({
   }, [schedule.length]);
 
   const activeTerm = terms.find(t => t.id === activeTermId);
-
-  const schoolReport = useMemo(() => {
-    if (!assignments.length) return [];
-    const balanced = applyDefaultDays(assignments, defDays);
-    const schoolMap = new Map<string, Map<string, 'Mon-Fri' | 'Tue-Sat'>>();
-    for (const a of balanced) {
-      if (!a.facultyId) continue;
-      const school = a.school.trim() || 'Unspecified';
-      if (!schoolMap.has(school)) schoolMap.set(school, new Map());
-      schoolMap.get(school)!.set(a.facultyId, a.workingDays as any);
-    }
-    return Array.from(schoolMap.entries())
-      .map(([school, fac]) => {
-        const total = fac.size;
-        const mf = Array.from(fac.values()).filter(d => d === 'Mon-Fri').length;
-        const ts = total - mf;
-        return { school, total, mf, ts, mfPct: total ? Math.round((mf / total) * 100) : 0, tsPct: total ? Math.round((ts / total) * 100) : 0 };
-      })
-      .sort((a, b) => a.school.localeCompare(b.school));
-  }, [assignments, defDays]);
 
   const parseCourseFile = useCallback((file: File) => {
     setParseError('');
@@ -433,51 +413,6 @@ const AutoSchedulePanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* School Roster Distribution — visible after CSV upload */}
-          {schoolReport.length > 0 && (
-            <div className="bg-white border border-[#e2e8f0] shadow-sm shrink-0">
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-[#f1f5f9]" style={{ background: 'linear-gradient(135deg, #ecfeff, #cffafe)' }}>
-                <GraduationCap className="w-3.5 h-3.5 text-[#0891b2]" />
-                <span className="text-[11px] font-black text-[#0f172a] uppercase tracking-wide">School Roster Distribution</span>
-                <span className="text-[9px] text-[#0891b2] ml-1">working day distribution</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-[9px]">
-                  <thead>
-                    <tr style={{ background: 'linear-gradient(135deg, #ecfeff, #cffafe)' }}>
-                      {['School', 'Mon–Fri', '%', 'Tue–Sat', '%', 'Total'].map(h => (
-                        <th key={h} className="px-2 py-1.5 text-left font-black text-[#0e7490] uppercase tracking-wider border-b border-[#a5f3fc] whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#ecfeff]">
-                    {schoolReport.map(row => (
-                      <tr key={row.school} className="hover:bg-[#ecfeff] transition-colors">
-                        <td className="px-2 py-1.5 font-bold text-[#0f172a] max-w-[120px] truncate">{row.school}</td>
-                        <td className="px-2 py-1.5 font-black text-[#059669]">{row.mf}</td>
-                        <td className="px-2 py-1.5">
-                          <span className="px-1 py-0.5 text-[8px] font-black bg-[#eff6ff] text-[#185baf]">
-                            {row.mfPct}%
-                          </span>
-                        </td>
-                        <td className="px-2 py-1.5 font-black text-[#7c3aed]">{row.ts}</td>
-                        <td className="px-2 py-1.5">
-                          <span className="px-1 py-0.5 text-[8px] font-black bg-[#f5f3ff] text-[#7c3aed]">
-                            {row.tsPct}%
-                          </span>
-                        </td>
-                        <td className="px-2 py-1.5 text-[#475569]">{row.total}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-[8px] text-[#64748b] px-3 py-1.5 border-t border-[#ecfeff]">
-                Explicit Mon-Fri / Tue-Sat in FacultyWorkingDays is respected. Blank rows use the Step 3 default.
-              </p>
-            </div>
-          )}
-
           {/* Step 3 */}
           <div className="bg-white border border-[#e2e8f0] shadow-sm shrink-0">
             <div className="flex items-center gap-2 px-3 py-2 border-b border-[#f1f5f9]" style={{ background: 'linear-gradient(135deg, #fffbeb, #fef3c7)' }}>
@@ -492,6 +427,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                   <span className="text-[9px] font-black text-[#334155] uppercase tracking-widest">Days</span>
                 </div>
                 <div className="flex flex-col gap-1">
+                  <Chip active={defDays === 'Mon-Sat'} onClick={() => setDefDays('Mon-Sat')}>Mon–Sat</Chip>
                   <Chip active={defDays === 'Mon-Fri'} onClick={() => setDefDays('Mon-Fri')}>Mon–Fri</Chip>
                   <Chip active={defDays === 'Tue-Sat'} onClick={() => setDefDays('Tue-Sat')}>Tue–Sat</Chip>
                 </div>
@@ -502,8 +438,9 @@ const AutoSchedulePanel: React.FC<Props> = ({
                   <span className="text-[9px] font-black text-[#334155] uppercase tracking-widest">Window</span>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Chip active={defStart === 8}  onClick={() => { setDefStart(8);  setDefEnd(16); }}>8 am–4 pm</Chip>
-                  <Chip active={defStart === 10} onClick={() => { setDefStart(10); setDefEnd(18); }}>10 am–6 pm</Chip>
+                  <Chip active={defStart === 8 && defEnd === 18}  onClick={() => { setDefStart(8);  setDefEnd(18); }}>8 am–6 pm</Chip>
+                  <Chip active={defStart === 8 && defEnd === 16}  onClick={() => { setDefStart(8);  setDefEnd(16); }}>8 am–4 pm</Chip>
+                  <Chip active={defStart === 10 && defEnd === 18} onClick={() => { setDefStart(10); setDefEnd(18); }}>10 am–6 pm</Chip>
                 </div>
               </div>
               <div>

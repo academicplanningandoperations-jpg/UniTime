@@ -562,9 +562,9 @@ export async function runAutoScheduler(
       entries.push({
         id:           `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         termId,
-        courseId:     course?.id   ?? '',
-        facultyId:    faculty?.id  ?? '',
-        roomId:       pickedRoom?.id ?? '',
+        courseId:     course?.id   ?? null,
+        facultyId:    faculty?.id  ?? null,
+        roomId:       pickedRoom?.id ?? null,
         groupIds,
         day,
         startTime,

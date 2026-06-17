@@ -138,6 +138,28 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
     });
   }, [entries, viewType, selectedIds, selectedWeeks, activeTermId]);
 
+  const cellEntriesMap = useMemo(() => {
+    const map = new Map<string, ScheduleEntry[]>();
+    const coveredSet = new Set<string>();
+
+    filteredEntries.forEach(e => {
+      const startIdx = TIME_SLOTS.indexOf(e.startTime);
+      const endIdx = TIME_SLOTS.indexOf(e.endTime);
+      if (startIdx === -1 || endIdx === -1) return;
+
+      const startKey = `${e.day}_${e.startTime}`;
+      if (!map.has(startKey)) map.set(startKey, []);
+      map.get(startKey)!.push(e);
+
+      // Mark covered cells for multi-slot events
+      for (let i = startIdx + 1; i < endIdx; i++) {
+        coveredSet.add(`${e.day}_${TIME_SLOTS[i]}`);
+      }
+    });
+
+    return { map, coveredSet };
+  }, [filteredEntries]);
+
   const calculateTotalHours = () => {
     const totalMinutes = filteredEntries.reduce((acc, e) => {
       const [sh, sm] = e.startTime.split(':').map(Number);
@@ -549,8 +571,9 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     {selectedWeeks.length === 1 && <div className="text-[9px] text-[#666] mt-0.5">{getDayDate(idx, selectedWeeks[0])}</div>}
                   </td>
                   {TIME_SLOTS.map(time => {
-                    const cellEntries = filteredEntries.filter(e => e.day === day && e.startTime === time);
-                    const isCovered = filteredEntries.some(e => e.day === day && time > e.startTime && time < e.endTime);
+                    const cellKey = `${day}_${time}`;
+                    const cellEntries = cellEntriesMap.map.get(cellKey) || [];
+                    const isCovered = cellEntriesMap.coveredSet.has(cellKey);
 
                     return (
                       <td

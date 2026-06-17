@@ -233,7 +233,7 @@ function buildDiagnostics(
   rejCohort: number,
   rejConsec: number,
   rejFixedRoom: number,
-  noRoomAssigned: number,
+  rejNoRoom: number,
   placed: number,
   needed: number,
 ): ConflictDiagnostics {
@@ -244,6 +244,7 @@ function buildDiagnostics(
     { name: 'faculty',   val: rejFaculty },
     { name: 'cohort',    val: rejCohort },
     { name: 'consec',    val: rejConsec },
+    { name: 'noRoom',    val: rejNoRoom },
   ].sort((a, b) => b.val - a.val);
   const top = drivers[0];
 
@@ -269,6 +270,9 @@ function buildDiagnostics(
     const facLabel = `${asgn.facultyName} (ID: ${asgn.facultyId})`;
     primaryReason = `${rejConsec} slots rejected to prevent ${facLabel} exceeding 2 consecutive teaching hours`;
     suggestions.push(`Spread ${facLabel}'s other courses across more days, or extend their working-hour window.`);
+  } else if (top.name === 'noRoom' && rejNoRoom > 0) {
+    primaryReason = `No room available on ${rejNoRoom} of ${totalCandidates} candidate slots`;
+    suggestions.push(`Rooms matching preferred or campus requirements are fully booked.`);
   } else if (placed > 0) {
     primaryReason = `Partial placement — ${placed} of ${needed} sessions placed`;
     suggestions.push(`${needed - placed} more slot(s) needed. Remaining candidates are blocked by faculty/cohort load.`);
@@ -276,9 +280,6 @@ function buildDiagnostics(
     primaryReason = `No viable slot in ${asgn.workingDays} ${asgn.timeStart}:00–${asgn.timeEnd}:00 (${totalCandidates} candidates checked)`;
     suggestions.push(`Widen the scheduling window via FacultyTimeStart/End or switch FacultyWorkingDays.`);
   }
-
-  if (noRoomAssigned > 0 && !asgn.fixedRoom)
-    suggestions.push(`${noRoomAssigned} sessions placed without a room — add rooms for campus "${asgn.campus}" or specify PreferredRooms.`);
 
   return {
     primaryReason,
@@ -491,7 +492,7 @@ export async function runAutoScheduler(
     const allowedHours = asgn.courseTimeBlock.trim() ? new Set(parseHours(asgn.courseTimeBlock)) : null;
 
     let placed = 0;
-    let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, noRoomAssigned = 0;
+    let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, rejNoRoom = 0;
     const rawCandidates = candidateDays.flatMap(day => {
       const lunch = dayLunchMap.get(day) ?? 13;
       let daySlots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, lunch, duration);
@@ -514,8 +515,6 @@ export async function runAutoScheduler(
     // room available AT THAT SPECIFIC slot. Saved instead of committed immediately,
     // so the scheduler keeps trying other day/time slots first — a room might be
     // free at a different time even if it's busy at this one.
-    const roomlessFallbacks: { day: string; startTime: string; endTime: string }[] = [];
-
     const pickRoomFor = (keys: string[]): Room | undefined => {
       if (asgn.fixedRoom) {
         const r = findRoom(asgn.fixedRoom);
@@ -549,14 +548,14 @@ export async function runAutoScheduler(
       return typeMatched.find(r => isFree(roomOcc, r.id, keys)) ?? campusRooms.find(r => isFree(roomOcc, r.id, keys));
     };
 
-    const commitPlacement = (day: string, startTime: string, endTime: string, pickedRoom: Room | undefined) => {
+    const commitPlacement = (day: string, startTime: string, endTime: string, pickedRoom: Room) => {
       const keys = slotKeys(day, startTime, endTime);
       if (faculty) {
         markBusy(facultyOcc, faculty.id, keys);
         if (!isLab) markBusy(facultyNonLabOcc, faculty.id, keys);
       }
       groups.forEach(g => markBusy(cohortOcc, g.id, keys));
-      if (pickedRoom) markBusy(roomOcc, pickedRoom.id, keys);
+      markBusy(roomOcc, pickedRoom.id, keys);
       takenDays.add(day);
 
       entries.push({
@@ -564,7 +563,7 @@ export async function runAutoScheduler(
         termId,
         courseId:     course?.id   ?? null,
         facultyId:    faculty?.id  ?? null,
-        roomId:       pickedRoom?.id ?? null,
+        roomId:       pickedRoom.id,
         groupIds,
         day,
         startTime,
@@ -573,15 +572,6 @@ export async function runAutoScheduler(
         weeks,
         category:     asgn.category,
       } as ScheduleEntry);
-
-      if (!pickedRoom) {
-        noRoomAssigned++;
-        roomless.push({
-          courseCode: asgn.courseCode, courseName: asgn.courseName,
-          facultyId: asgn.facultyId, facultyName: asgn.facultyName,
-          cohorts: asgn.cohorts, day, startTime, endTime,
-        });
-      }
 
       placed++;
       onProgress(entries.length, totalSessions, `${asgn.courseCode} · ${asgn.cohorts[0] ?? ''}`);
@@ -603,31 +593,17 @@ export async function runAutoScheduler(
       const pickedRoom = pickRoomFor(keys);
       if (!pickedRoom) {
         if (asgn.fixedRoom) { rejFixedRoom++; continue; } // fixed room taken — try next slot
-        roomlessFallbacks.push({ day, startTime, endTime });
-        continue; // try a different slot before settling for no room
+        rejNoRoom++;
+        continue; // try a different slot since room is busy
       }
 
       commitPlacement(day, startTime, endTime, pickedRoom);
     }
 
-    // Pass 2: last resort — only reached if pass 1 couldn't fill all sessions
-    // with a room. Re-validates faculty/cohort/day since state may have moved on.
-    for (const { day, startTime, endTime } of roomlessFallbacks) {
-      if (placed >= sessionsNeeded) break;
-      if (takenDays.has(day)) continue;
-
-      const keys = slotKeys(day, startTime, endTime);
-      if (faculty && !isFree(facultyOcc, faculty.id, keys)) continue;
-      if (groups.some(g => !isFree(cohortOcc, g.id, keys))) continue;
-      if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) continue;
-
-      commitPlacement(day, startTime, endTime, undefined);
-    }
-
     if (placed < sessionsNeeded) {
       const diag = buildDiagnostics(
         asgn, candidates.length,
-        rejFaculty, rejCohort, rejConsec, rejFixedRoom, noRoomAssigned,
+        rejFaculty, rejCohort, rejConsec, rejFixedRoom, rejNoRoom,
         placed, sessionsNeeded,
       );
       unresolved.push({

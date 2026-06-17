@@ -174,9 +174,9 @@ CREATE TABLE IF NOT EXISTS public.groups (
 CREATE TABLE IF NOT EXISTS public.schedule (
     id TEXT PRIMARY KEY,
     "termId" TEXT NOT NULL,
-    "courseId" TEXT NOT NULL,
-    "facultyId" TEXT NOT NULL,
-    "roomId" TEXT NOT NULL,
+    "courseId" TEXT,
+    "facultyId" TEXT,
+    "roomId" TEXT,
     "groupIds" TEXT[] NOT NULL,
     day TEXT NOT NULL,
     "startTime" TEXT NOT NULL,

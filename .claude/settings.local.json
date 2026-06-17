@@ -1,6 +1,40 @@
 {
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:myupes-beta.upes.ac.in)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npm run *)",
+      "Bash(node -e \"const fs=require\\('fs'\\); const txt=fs.readFileSync\\('components/Dashboard.tsx','utf8'\\); const lines=txt.split\\('\\\\n'\\); lines.forEach\\(\\(l,i\\)=>{ if\\(l.includes\\('/'\\) && i>143 && i<435\\) console.log\\(i+1, JSON.stringify\\(l\\)\\); }\\);\")",
+      "Bash(node -e ' *)",
+      "Bash(node -e \"const pkg=require\\('./node_modules/vite/package.json'\\); console.log\\('vite:', pkg.version\\); const eb=require\\('./node_modules/esbuild/package.json'\\); console.log\\('esbuild:', eb.version\\);\")",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(node -e \"const sharp = require\\('sharp'\\); console.log\\('sharp ok'\\)\")",
+      "Bash(node -e \"const { createCanvas } = require\\('canvas'\\); console.log\\('canvas ok'\\)\")",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" log --oneline -15)",
+      "Bash(ls \"C:\\\\Users\\\\vikhyat.kashyap\\\\.claude\\\\projects\\\\d--02-Jan-May-2026-AnitGravity-unitime--university-timetable-management-system--1-\\\\memory\\\\\" 2>/dev/null || echo \"No memory directory\")",
+      "Read(//c/Users/vikhyat.kashyap/.claude/projects/d--02-Jan-May-2026-AnitGravity-unitime--university-timetable-management-system--1-/memory\" 2>/dev/**)",
+      "Bash(dir \"C:\\\\Users\\\\vikhyat.kashyap\\\\.claude\\\\projects\\\\d--02-Jan-May-2026-AnitGravity-unitime--university-timetable-management-system--1-\\\\memory\\\\\")",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" diff HEAD~1 HEAD --stat)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" diff HEAD~1 HEAD)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" status)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" add public/sw.js)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" commit -m \"fix: bump SW cache to v7, switch to network-first for JS assets\")",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" push origin main)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" add services/dataService.ts)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" commit -m \"fix: null-guard facultyId in detectConflicts — null.slice\\(-6\\) crash\")",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" add components/ChatbotPanel.tsx App.tsx)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" commit -m \"feat: add UniTime AI chatbot \\(Gemini 1.5 Flash, context-aware, usage meter\\)\")",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" add components/ChatbotPanel.tsx components/TopNav.tsx App.tsx)",
+      "Bash(git -C \"d:\\\\02.Jan-May 2026\\\\AnitGravity\\\\unitime_-university-timetable-management-system \\(1\\)\" commit -m \"feat: move AI assistant to top nav button, light theme floating window\")"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "supabase"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

@@ -521,10 +521,16 @@ export async function runAutoScheduler(
         const r = findRoom(asgn.fixedRoom);
         return r && isFree(roomOcc, r.id, keys) ? r : undefined;
       }
-      const preferredObjs = asgn.preferredRooms.map(name => findRoom(name)).filter(Boolean) as Room[];
-      const fromPreferred = preferredObjs.find(r => isFree(roomOcc, r.id, keys));
-      if (fromPreferred) return fromPreferred;
 
+      // When preferred rooms are specified, ONLY choose from those rooms.
+      // Do NOT fall back to arbitrary campus rooms — the user explicitly
+      // listed which rooms this course may use.
+      const preferredObjs = asgn.preferredRooms.map(name => findRoom(name)).filter(Boolean) as Room[];
+      if (preferredObjs.length > 0) {
+        return preferredObjs.find(r => isFree(roomOcc, r.id, keys));
+      }
+
+      // No preferred rooms specified — search all campus rooms by type
       const campusRooms = existingRooms.filter(r => {
         if (!asgn.campus.trim()) return true; // no campus requirement on this row
         const mappedCampus = normRoomCampusMap.get(normName(r.name)) ?? normRoomCampusMap.get(normName((r as any)._unique_name ?? ''));
@@ -556,9 +562,9 @@ export async function runAutoScheduler(
       entries.push({
         id:           `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         termId,
-        courseId:     course?.id   ?? null,
-        facultyId:    faculty?.id  ?? null,
-        roomId:       pickedRoom?.id ?? null,
+        courseId:     course?.id   ?? '',
+        facultyId:    faculty?.id  ?? '',
+        roomId:       pickedRoom?.id ?? '',
         groupIds,
         day,
         startTime,

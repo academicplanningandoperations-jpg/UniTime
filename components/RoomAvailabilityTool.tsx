@@ -24,7 +24,7 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
   const [day, setDay] = useState<DayOfWeek>('Monday');
   const [week, setWeek] = useState(1);
   const [startTimeFilter, setStartTimeFilter] = useState('08:00');
-  const [endTimeFilter, setEndTimeFilter] = useState('21:00');
+  const [endTimeFilter, setEndTimeFilter] = useState('19:00');
   const [searchQuery, setSearchQuery] = useState('');
   const dragControls = useDragControls();
 

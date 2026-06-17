@@ -440,7 +440,7 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
                     <select className="w-full border border-[#ccc] bg-white px-2 py-1 pb-[3px] text-[11px] font-bold outline-none focus:border-[#185baf] uppercase cursor-pointer" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value as Role})}>
                       <option value={Role.SCHEDULER}>Scheduler</option>
                       <option value={Role.ADMIN}>Administrator</option>
-                      <option value={Role.SUPER_ADMIN}>Chief Architect</option>
+                      <option value={Role.SUPER_ADMIN}>Super Admin</option>
                       <option value={Role.VIEWER}>Read Only Viewer</option>
                     </select>
                   </div>

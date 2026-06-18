@@ -83,6 +83,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, entry?: ScheduleEntry, cell?: { day: DayOfWeek, time: string } } | null>(null);
+  const [dragEntry, setDragEntry] = useState<ScheduleEntry | null>(null);
 
   const dragStart = useRef({ x: 0, y: 0, startX: 0, startY: y });
   const resizeStart = useRef({ startW: 0, startH: 0, startX: 0, startY: 0, mouseX: 0, mouseY: 0 });
@@ -173,6 +174,59 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
 
     return { map, coveredSet };
   }, [filteredEntries]);
+
+  // Slot highlight map built when the user starts dragging an entry.
+  // For every (day, startTime) cell it marks whether placing the dragged
+  // entry there would clash ('busy') or is safe ('free').
+  // The entry's current position is marked 'origin'.
+  const dragHighlightMap = useMemo(() => {
+    if (!dragEntry) return null;
+
+    const startIdx = TIME_SLOTS.indexOf(dragEntry.startTime);
+    const endIdx   = TIME_SLOTS.indexOf(dragEntry.endTime);
+    if (startIdx === -1 || endIdx === -1) return null;
+    const slotCount = endIdx - startIdx; // number of 30-min grid columns
+
+    const dragWeeks = new Set(dragEntry.weeks ?? []);
+
+    // All other entries in the same term that share at least one week
+    const others = entries.filter((e: ScheduleEntry) =>
+      e.id !== dragEntry.id &&
+      (!activeTermId || e.termId === activeTermId) &&
+      (e.weeks?.some((w: number) => dragWeeks.has(w)) ?? true)
+    );
+
+    const map = new Map<string, 'free' | 'busy' | 'origin'>();
+
+    for (const day of DAYS as DayOfWeek[]) {
+      for (let i = 0; i < TIME_SLOTS.length; i++) {
+        if (i + slotCount >= TIME_SLOTS.length) break; // would overshoot the grid
+        const targetStart = TIME_SLOTS[i];
+        const targetEnd   = TIME_SLOTS[i + slotCount];
+        const key = `${day}_${targetStart}`;
+
+        if (day === dragEntry.day && targetStart === dragEntry.startTime) {
+          map.set(key, 'origin');
+          continue;
+        }
+
+        const hasCrash = others.some((e: ScheduleEntry) => {
+          if (e.day !== day) return false;
+          // Standard interval overlap: [eStart, eEnd) ∩ [targetStart, targetEnd) ≠ ∅
+          if (e.startTime >= targetEnd || e.endTime <= targetStart) return false;
+          return (
+            (!!dragEntry.facultyId && e.facultyId === dragEntry.facultyId) ||
+            (!!dragEntry.roomId    && e.roomId    === dragEntry.roomId)    ||
+            (dragEntry.groupIds?.some((gid: string) => e.groupIds?.includes(gid)) ?? false)
+          );
+        });
+
+        map.set(key, hasCrash ? 'busy' : 'free');
+      }
+    }
+
+    return map;
+  }, [dragEntry, entries, activeTermId]);
 
   const calculateTotalHours = () => {
     const totalMinutes = filteredEntries.reduce((acc, e) => {
@@ -283,6 +337,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
     e.dataTransfer.setData('entryId', entry.id);
     e.dataTransfer.setData('sourcePanelId', id);
     e.dataTransfer.effectAllowed = 'copyMove';
+    setDragEntry(entry);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -292,6 +347,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
 
   const handleDrop = (e: React.DragEvent, day: DayOfWeek, time: string) => {
     e.preventDefault();
+    setDragEntry(null);
     const entryId = e.dataTransfer.getData('entryId');
     const sourcePanelId = e.dataTransfer.getData('sourcePanelId');
     if (!entryId) return;
@@ -321,6 +377,12 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
     const closeContext = () => setContextMenu(null);
     window.addEventListener('click', closeContext);
     return () => window.removeEventListener('click', closeContext);
+  }, []);
+
+  useEffect(() => {
+    const clearDrag = () => setDragEntry(null);
+    document.addEventListener('dragend', clearDrag);
+    return () => document.removeEventListener('dragend', clearDrag);
   }, []);
 
   const getSlotCount = (start: string, end: string) => {
@@ -588,6 +650,16 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     const cellKey = `${day}_${time}`;
                     const cellEntries = cellEntriesMap.map.get(cellKey) || [];
                     const isCovered = cellEntriesMap.coveredSet.has(cellKey);
+                    const dragHint = dragHighlightMap?.get(cellKey);
+
+                    // Drag-overlay background: green = free, red = busy, grey = origin slot
+                    const dragOverlayStyle = dragHint === 'free'
+                      ? { background: 'rgba(34,197,94,0.22)', borderColor: '#16a34a' }
+                      : dragHint === 'busy'
+                      ? { background: 'rgba(239,68,68,0.22)', borderColor: '#dc2626' }
+                      : dragHint === 'origin'
+                      ? { background: 'rgba(100,116,139,0.18)', borderColor: '#64748b' }
+                      : null;
 
                     return (
                       <td
@@ -596,10 +668,22 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                         onContextMenu={(e) => !isCovered && handleCellContextMenu(e, day as DayOfWeek, time)}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, day as DayOfWeek, time)}
-                        className={`relative border-r border-b border-[#eee] transition-colors ${isMaximized ? 'h-32' : 'h-14'} ${isCovered ? 'bg-[#f5f5f5]' : 'hover:bg-[#e0ebf9] cursor-pointer group/cell'} ${time.endsWith(':30') ? 'border-r-[#e0e0e0]' : 'border-r-[#f0f0f0]'}`}
+                        className={`relative border-r border-b transition-colors ${isMaximized ? 'h-32' : 'h-14'} ${isCovered ? 'bg-[#f5f5f5]' : dragHighlightMap ? 'cursor-pointer' : 'hover:bg-[#e0ebf9] cursor-pointer group/cell'} ${time.endsWith(':30') ? 'border-r-[#e0e0e0]' : 'border-r-[#f0f0f0]'}`}
+                        style={dragOverlayStyle ?? undefined}
                       >
+                        {/* Drag hint icon overlay */}
+                        {dragHint === 'free' && !isCovered && (
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[3] opacity-40">
+                            <div className="w-2 h-2 rounded-full bg-green-500" />
+                          </div>
+                        )}
+                        {dragHint === 'busy' && !isCovered && (
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[3] opacity-50">
+                            <div className="text-red-600 font-black text-[10px]">✕</div>
+                          </div>
+                        )}
                         {/* "+" button — always visible on hover for non-covered cells (including cells with existing entries for intentional clashes) */}
-                        {!isCovered && (
+                        {!isCovered && !dragHighlightMap && (
                           <div
                             className="absolute top-0.5 right-0.5 z-50 opacity-0 group-hover/cell:opacity-100 transition-opacity"
                             onClick={(e) => { e.stopPropagation(); onCellClick?.(day as DayOfWeek, time, viewType, selectedIds.length === 1 ? selectedIds[0] : ''); }}

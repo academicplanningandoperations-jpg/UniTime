@@ -729,12 +729,6 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                     {index + 1}
                                   </div>
                                 )}
-                                {/* Session type badge */}
-                                {entry.category && !hasConflict && (
-                                  <div className="absolute top-0 right-0 text-[7px] font-black uppercase px-1 py-0.5 leading-none pointer-events-none" style={{ color: entryBdr, background: `${entryBdr}22` }}>
-                                    {entry.category}
-                                  </div>
-                                )}
                                 <div className={`${isMaximized ? 'text-[11px]' : 'text-[9px]'} font-bold leading-[1.1] uppercase truncate tracking-tight pr-3`}>{course?.name}</div>
                                 {isMaximized && (
                                   <div className="text-[9px] font-normal opacity-70 truncate mt-0.5">{course?.code}</div>

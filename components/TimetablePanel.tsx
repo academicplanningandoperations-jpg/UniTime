@@ -13,6 +13,20 @@ const TYPE_THEMES = {
   Course:  { headerGrad: 'linear-gradient(135deg, #047857 0%, #10b981 100%)', borderColor: '#10b981', entryColor: '#059669', entryBorder: '#047857', accent: '#10b981' },
 } as const;
 
+const SESSION_TYPE_COLORS: Record<string, { bg: string; border: string; text: string }> = {
+  lab:      { bg: '#bbf7d0', border: '#16a34a', text: '#14532d' },
+  theory:   { bg: '#fed7aa', border: '#ea580c', text: '#7c2d12' },
+  tutorial: { bg: '#fef08a', border: '#ca8a04', text: '#713f12' },
+  explo:    { bg: '#bfdbfe', border: '#2563eb', text: '#1e3a8a' },
+  studio:   { bg: '#e9d5ff', border: '#9333ea', text: '#3b0764' },
+  seminar:  { bg: '#fce7f3', border: '#db2777', text: '#831843' },
+};
+
+function getSessionColors(category: string | undefined) {
+  if (!category) return null;
+  return SESSION_TYPE_COLORS[category.toLowerCase()] ?? null;
+}
+
 const getDayDate = (dayIndex: number, week: number) => {
   const startDate = new Date('2024-09-02');
   const daysToAdd = (week - 1) * 7 + dayIndex;
@@ -597,24 +611,30 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                           {cellEntries.map((entry, index) => {
                             const course = courses.find(c => c.id === entry.courseId);
                             const slots = getSlotCount(entry.startTime, entry.endTime);
+                            const sessionColors = getSessionColors(entry.category);
                             const hasConflict = cellEntries.length > 1;
                             const cascadeX = index * 4;
                             const cascadeY = index * 4;
 
+                            const entryBg    = hasConflict ? '#ef4444' : (sessionColors?.bg    ?? theme.entryColor);
+                            const entryBdr   = hasConflict ? '#b91c1c' : (sessionColors?.border ?? theme.entryBorder);
+                            const entryTxt   = hasConflict ? '#fff'    : (sessionColors?.text   ?? '#fff');
+                            const dividerCls = sessionColors ? 'border-black/15' : 'border-white/30';
+
                             return (
-                              <div 
-                                key={entry.id} 
+                              <div
+                                key={entry.id}
                                 draggable="true"
                                 onDragStart={(e) => handleDragStart(e, entry)}
                                 onContextMenu={(e) => handleContextMenu(e, entry)}
-                                onClick={(e) => { e.stopPropagation(); onEntryClick?.(entry, cellEntries); }} 
-                                className={`absolute shadow-[2px_2px_4px_rgba(0,0,0,0.3)] flex flex-col p-1 border hover:border-black transition-all cursor-grab active:cursor-grabbing overflow-hidden pointer-events-auto group/entry ${hasConflict ? 'hover:z-[100]' : ''}`} 
-                                style={{ 
+                                onClick={(e) => { e.stopPropagation(); onEntryClick?.(entry, cellEntries); }}
+                                className={`absolute shadow-[2px_2px_4px_rgba(0,0,0,0.3)] flex flex-col p-1 border hover:border-black transition-all cursor-grab active:cursor-grabbing overflow-hidden pointer-events-auto group/entry ${hasConflict ? 'hover:z-[100]' : ''}`}
+                                style={{
                                   top: `${cascadeY}px`,
                                   left: `${cascadeX}px`,
-                                  backgroundColor: hasConflict ? '#ef4444' : theme.entryColor,
-                                  borderColor: hasConflict ? '#b91c1c' : theme.entryBorder,
-                                  color: '#fff',
+                                  backgroundColor: entryBg,
+                                  borderColor: entryBdr,
+                                  color: entryTxt,
                                   width: slots > 1 ? `calc(${slots * 100}% + ${(slots - 1) * 2}px - ${cascadeX}px)` : `calc(100% - ${cascadeX}px)`,
                                   height: `calc(100% - ${cascadeY}px)`,
                                   zIndex: 20 + index
@@ -625,11 +645,19 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                     {index + 1}
                                   </div>
                                 )}
+                                {/* Session type badge */}
+                                {entry.category && !hasConflict && (
+                                  <div className="absolute top-0 right-0 text-[7px] font-black uppercase px-1 py-0.5 leading-none pointer-events-none" style={{ color: entryBdr, background: `${entryBdr}22` }}>
+                                    {entry.category}
+                                  </div>
+                                )}
                                 <div className={`${isMaximized ? 'text-[11px]' : 'text-[9px]'} font-bold leading-[1.1] uppercase truncate tracking-tight pr-3`}>{course?.name}</div>
-                                <div className={`${isMaximized ? 'text-[10px]' : 'text-[8px]'} font-normal opacity-90 truncate mt-0.5`}>{course?.code}</div>
-                                
                                 {isMaximized && (
-                                  <div className="mt-2 pt-2 border-t border-white/30 flex flex-col gap-1.5 overflow-hidden">
+                                  <div className="text-[9px] font-normal opacity-70 truncate mt-0.5">{course?.code}</div>
+                                )}
+
+                                {isMaximized && (
+                                  <div className={`mt-2 pt-2 border-t ${dividerCls} flex flex-col gap-1.5 overflow-hidden`}>
                                      <div className="flex items-center gap-2 text-[10px] font-bold opacity-100 truncate">
                                          <Users className="w-3.5 h-3.5 shrink-0" />
                                          <span>{entry.groupIds?.map(id => groups.find(g => g.id === id)?.name).filter(Boolean).join(', ') || 'No Cohort'}</span>
@@ -652,16 +680,16 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
 
                                 {!isMaximized && (
                                   <div className="mt-auto flex justify-between items-end">
-                                    <span className="text-[8px] truncate max-w-[60%] opacity-90 font-bold">
-                                      {viewType === 'Faculty' 
+                                    <span className="text-[8px] truncate max-w-[60%] opacity-80 font-bold">
+                                      {viewType === 'Faculty'
                                         ? (groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ') || 'No Cohort')
                                         : (() => {
                                             const f = faculties.find(f => f.id === entry.facultyId);
                                             return f ? `${f.name} (${f.facultyId || f.id})` : 'No Staff';
                                           })()}
                                     </span>
-                                    <span className="text-[8px] font-bold bg-white/20 px-1 py-0.5 leading-none">
-                                      {viewType === 'Room' 
+                                    <span className="text-[8px] font-bold px-1 py-0.5 leading-none" style={{ background: `${entryBdr}22` }}>
+                                      {viewType === 'Room'
                                         ? groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ')
                                         : rooms.find(r => r.id === entry.roomId)?.name || 'No Room'}
                                     </span>

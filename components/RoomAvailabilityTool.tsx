@@ -37,15 +37,18 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
     if (resourceType === 'Room') {
       return rooms
         .filter(r => !q || r.name.toLowerCase().includes(q) || r.type.toLowerCase().includes(q))
+        .sort((a, b) => a.name.localeCompare(b.name))
         .map(r => ({ id: r.id, name: r.name, sub: `${r.type} · Cap: ${r.capacity}` }));
     }
     if (resourceType === 'Faculty') {
       return faculties
         .filter(f => !q || f.name.toLowerCase().includes(q) || (f.facultyId || '').toLowerCase().includes(q))
+        .sort((a, b) => a.name.localeCompare(b.name))
         .map(f => ({ id: f.id, name: f.name, sub: f.department }));
     }
     return groups
       .filter(g => !q || g.name.toLowerCase().includes(q) || g.program.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name))
       .map(g => ({ id: g.id, name: g.name, sub: `${g.program} · Sem ${g.semester}` }));
   }, [resourceType, rooms, faculties, groups, searchQuery]);
 

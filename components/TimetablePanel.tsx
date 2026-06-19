@@ -565,19 +565,21 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
               onClick={onUndo}
               disabled={!canUndo}
               title="Undo (Ctrl+Z)"
-              className="p-1 transition-all rounded-sm border border-transparent hover:bg-white/20 hover:border-white/40 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest transition-all rounded-sm border border-white/40 bg-white/20 hover:bg-white/35 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Undo2 className="w-3.5 h-3.5" />
+              Undo
             </button>
             <button
               onClick={onRedo}
               disabled={!canRedo}
               title="Redo (Ctrl+Y)"
-              className="p-1 transition-all rounded-sm border border-transparent hover:bg-white/20 hover:border-white/40 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest transition-all rounded-sm border border-white/40 bg-white/20 hover:bg-white/35 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Redo2 className="w-3.5 h-3.5" />
+              Redo
             </button>
-            <div className="w-px h-4 bg-white/20 mx-0.5" />
+            <div className="w-px h-4 bg-white/30 mx-0.5" />
             <button
               onClick={onMaximize}
               title={isMaximized ? "Restore Size" : "Maximize View"}

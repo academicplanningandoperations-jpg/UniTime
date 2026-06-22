@@ -132,6 +132,11 @@ function markBusy(occ: Map<string, Set<string>>, id: string, keys: string[]) {
   keys.forEach(k => occ.get(id)!.add(k));
 }
 
+function removeBusy(occ: Map<string, Set<string>>, id: string, keys: string[]) {
+  const s = occ.get(id);
+  if (s) keys.forEach(k => s.delete(k));
+}
+
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -269,17 +274,23 @@ function wouldCreateLongRun(
 }
 
 // Returns true if placing newKeys for groupId on the given day would leave
-// a gap of more than maxFreeHours consecutive free hours between any two
-// session blocks. Only applies when the cohort already has sessions that day;
+// a gap of more than maxFreeHours non-lunch free hours between any two
+// session blocks. Lunch hours are excluded from the gap count because students
+// are expected to eat during that window — they are not "waiting" for class.
+// Only applies when the cohort already has sessions that day;
 // a fresh day always returns false (no gap to measure).
-// Example: existing session at 08:00, new session at 16:00 → 7 free hours → reject.
-//          existing session at 08:00, new session at 11:00 → 2 free hours → allow.
+// Example (lunchHours=[12,13]):
+//   08:00 existing, 16:00 new → non-lunch gap [9,10,11,14,15] = 5 → reject.
+//   10:00 existing, 14:00 new → non-lunch gap [11] = 1 → allow.
+//   10:00 existing, 15:00 new → non-lunch gap [11,14] = 2 → allow.
+//   10:00 existing, 16:00 new → non-lunch gap [11,14,15] = 3 → reject.
 function wouldCreateLargeGap(
   cohortOcc: Map<string, Set<string>>,
   groupId: string,
   day: string,
   newKeys: string[],
-  maxFreeHours: number = 2
+  maxFreeHours: number = 2,
+  lunchHours: number[] = []
 ): boolean {
   const prefix = `${day}~`;
   const s = cohortOcc.get(groupId);
@@ -309,7 +320,9 @@ function wouldCreateLargeGap(
   const sorted = Array.from(occupied).sort((a, b) => a - b);
   if (sorted.length < 2) return false;
 
-  // Group consecutive hours into session blocks, then measure gaps between blocks
+  const lunchSet = new Set(lunchHours);
+
+  // Group consecutive hours into session blocks, then measure non-lunch gaps
   const blocks: { start: number; end: number }[] = [];
   let bStart = sorted[0], bEnd = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
@@ -319,9 +332,13 @@ function wouldCreateLargeGap(
   blocks.push({ start: bStart, end: bEnd });
 
   for (let i = 1; i < blocks.length; i++) {
-    // Free hours sitting between end of block i-1 and start of block i
-    const freeHours = blocks[i].start - blocks[i - 1].end - 1;
-    if (freeHours > maxFreeHours) return true;
+    // Count only non-lunch hours between block end and next block start.
+    // Lunch hours in the gap don't count — students take their break then.
+    let freeNonLunch = 0;
+    for (let h = blocks[i - 1].end + 1; h < blocks[i].start; h++) {
+      if (!lunchSet.has(h)) freeNonLunch++;
+    }
+    if (freeNonLunch > maxFreeHours) return true;
   }
   return false;
 }
@@ -484,11 +501,18 @@ export async function runAutoScheduler(
 
   // ── Pre-populate occupancy from already-saved timetable entries ────────────
   // This lets incremental uploads respect sessions from previous runs.
+  // Also seeds cohortDaySessionCount so that incremental scheduling does not
+  // ignore activity placed by a previous run when choosing day tiers.
+  const cohortDaySessionCount = new Map<string, number>();
   for (const entry of existingSchedule) {
     if (entry.termId !== termId) continue;
     const keys = slotKeys(entry.day, entry.startTime, entry.endTime);
     if (entry.facultyId) markBusy(facultyOcc, entry.facultyId, keys);
-    entry.groupIds?.forEach(gid => markBusy(cohortOcc, gid, keys));
+    entry.groupIds?.forEach(gid => {
+      markBusy(cohortOcc, gid, keys);
+      const k = `${gid}~${entry.day}`;
+      cohortDaySessionCount.set(k, (cohortDaySessionCount.get(k) ?? 0) + 1);
+    });
     if (entry.roomId) markBusy(roomOcc, entry.roomId, keys);
   }
 
@@ -601,30 +625,31 @@ export async function runAutoScheduler(
       if (isLab && !asgn.courseTimeBlock.trim()) daySlots = daySlots.filter(sl => parseInt(sl.startTime) % 2 === 0);
       return daySlots.map(sl => ({ day, ...sl }));
     });
-    // 3-tier candidate ordering to minimise single-class days and large gaps:
-    //  Tier 1 — days where cohort already has 2+ hours of sessions (most active).
-    //            Adding here keeps the day productive and avoids creating new
-    //            isolated days.
-    //  Tier 2 — days where cohort has exactly 1 hour (one lonely session).
-    //            A second session here is strongly preferred over opening a
-    //            brand-new day so students aren't wasting a trip for one class.
-    //  Tier 3 — fresh days the cohort doesn't attend at all yet (last resort).
-    const cohortHoursOnDay = (day: string): number => {
-      const prefix = `${day}~`;
+    // 4-tier candidate ordering to build days toward ≥3 sessions before opening
+    // new days.  Counts are in actual placed sessions (not hour-slots), so a 2h
+    // lab still counts as 1 session — same weight as a 1h theory class.
+    //
+    //  Tier 1 — days with exactly 2 sessions: one more reaches the 3-session
+    //            minimum → MOST URGENT, tried first.
+    //  Tier 2 — days with exactly 1 session: two more needed → still strongly
+    //            preferred over opening a fresh day.
+    //  Tier 3 — days with ≥3 sessions: minimum already met; can absorb more
+    //            after the underserved days have been attended to.
+    //  Tier 4 — fresh days with 0 sessions: last resort; opening a new day
+    //            risks creating a single-class day.
+    const cohortSessionsOnDay = (day: string): number => {
       let max = 0;
       for (const gid of groupIds) {
-        const s = cohortOcc.get(gid);
-        if (!s) continue;
-        let cnt = 0;
-        for (const k of s) if (k.startsWith(prefix)) cnt++;
+        const cnt = cohortDaySessionCount.get(`${gid}~${day}`) ?? 0;
         if (cnt > max) max = cnt;
       }
       return max;
     };
-    const busyDays  = shuffle(rawCandidates.filter(c => cohortHoursOnDay(c.day) >= 2));
-    const lightDays = shuffle(rawCandidates.filter(c => cohortHoursOnDay(c.day) === 1));
-    const freshDays = shuffle(rawCandidates.filter(c => cohortHoursOnDay(c.day) === 0));
-    const candidates = [...busyDays, ...lightDays, ...freshDays];
+    const cS2 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) === 2));
+    const cS1 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) === 1));
+    const cS3 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) >= 3));
+    const cS0 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) === 0));
+    const candidates = [...cS2, ...cS1, ...cS3, ...cS0];
 
     // Candidates that passed faculty/cohort/consecutive-hours checks but had no
     // room available AT THAT SPECIFIC slot. Saved instead of committed immediately,
@@ -669,7 +694,11 @@ export async function runAutoScheduler(
         markBusy(facultyOcc, faculty.id, keys);
         if (!isLab) markBusy(facultyNonLabOcc, faculty.id, keys);
       }
-      groups.forEach(g => markBusy(cohortOcc, g.id, keys));
+      groups.forEach(g => {
+        markBusy(cohortOcc, g.id, keys);
+        const dk = `${g.id}~${day}`;
+        cohortDaySessionCount.set(dk, (cohortDaySessionCount.get(dk) ?? 0) + 1);
+      });
       markBusy(roomOcc, pickedRoom.id, keys);
       takenDays.add(day);
 
@@ -704,7 +733,7 @@ export async function runAutoScheduler(
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
       if (groups.some(g => !isFree(cohortOcc, g.id, keys))) { rejCohort++; continue; }
       if (groups.some(g => !leavesLunchFree(cohortOcc, g.id, day, lunchHours, keys))) { rejCohort++; continue; }
-      if (groups.some(g => wouldCreateLargeGap(cohortOcc, g.id, day, keys, 2))) { rejCohort++; continue; }
+      if (groups.some(g => wouldCreateLargeGap(cohortOcc, g.id, day, keys, 2, lunchHours))) { rejCohort++; continue; }
       if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; continue; }
 
       const pickedRoom = pickRoomFor(keys);
@@ -738,6 +767,110 @@ export async function runAutoScheduler(
     }
 
     if (ai % 5 === 4) await new Promise(r => setTimeout(r, 0));
+  }
+
+  // ── Post-processing: eliminate single-event days ───────────────────────────
+  // After the greedy pass some cohort-days can end up with only 1 session
+  // (e.g. a 5-session course places one session per day; the last day it uses
+  // has no other courses landing there).  We run up to 4 relocation sweeps:
+  // each sweep finds a lonely session (cohort has exactly 1 event on that day)
+  // and tries to move it to a day where the same cohort already has ≥2 events,
+  // provided faculty, room, lunch and gap constraints are still satisfied.
+  // A snapshot of the counts at the START of each sweep prevents cascades that
+  // could produce chaotic moves; live maps are updated so conflict checks work.
+  const CONSOLIDATION_LUNCH = [12, 13, 14]; // conservative window for the pass
+  for (let sweep = 0; sweep < 4; sweep++) {
+    let improved = false;
+    // Snapshot: counts at the start of this sweep decide what's "lonely"
+    const snap = new Map<string, number>(cohortDaySessionCount);
+
+    for (const entry of [...entries]) {
+      if (entry.termId !== termId) continue;
+      const gids = entry.groupIds ?? [];
+      if (gids.length === 0) continue;
+
+      // Only relocate if this is a lonely day (exactly 1 session) for ≥1 cohort
+      if (!gids.some(gid => (snap.get(`${gid}~${entry.day}`) ?? 0) === 1)) continue;
+
+      // Prevent same-course landing on the same day twice (mirrors takenDays)
+      const sameCourseDays = new Set<string>(
+        entries
+          .filter(e => e !== entry
+            && e.courseId    === entry.courseId
+            && e.facultyId   === entry.facultyId
+            && (e.groupIds ?? []).some(g => gids.includes(g)))
+          .map(e => e.day as string)
+      );
+
+      // Compute session duration in fractional hours from the stored time strings
+      const [sH, sM] = entry.startTime.split(':').map(Number);
+      const [eH, eM] = entry.endTime.split(':').map(Number);
+      const durH = (eH - sH) + (eM - sM) / 60;
+
+      const oldKeys = slotKeys(entry.day, entry.startTime, entry.endTime);
+
+      // Target days: cohort has ≥2 events (snapshot) and this course isn't there yet
+      const targetDays = ALL_DAYS.filter(d =>
+        d !== entry.day &&
+        !sameCourseDays.has(d) &&
+        gids.some(gid => (snap.get(`${gid}~${d}`) ?? 0) >= 2)
+      );
+      if (targetDays.length === 0) continue;
+
+      // Tentatively release this session from all occupancy maps so we can
+      // probe alternative slots without false conflicts.
+      if (entry.facultyId) removeBusy(facultyOcc, entry.facultyId, oldKeys);
+      gids.forEach(gid => removeBusy(cohortOcc, gid, oldKeys));
+      if (entry.roomId)    removeBusy(roomOcc,    entry.roomId,    oldKeys);
+
+      let moved = false;
+      outer: for (const tDay of targetDays) {
+        for (const { startTime, endTime } of buildSlots(8, 19, durH)) {
+          const newKeys = slotKeys(tDay, startTime, endTime);
+
+          if (entry.facultyId && !isFree(facultyOcc, entry.facultyId, newKeys)) continue;
+          if (gids.some(gid => !isFree(cohortOcc, gid, newKeys)))               continue;
+          if (gids.some(gid => !leavesLunchFree(cohortOcc, gid, tDay, CONSOLIDATION_LUNCH, newKeys))) continue;
+          if (gids.some(gid =>  wouldCreateLargeGap(cohortOcc, gid, tDay, newKeys, 2, CONSOLIDATION_LUNCH))) continue;
+
+          // Prefer the session's original room; fall back to any free room
+          const origRoom = existingRooms.find(r => r.id === entry.roomId);
+          const newRoom  = (origRoom && isFree(roomOcc, origRoom.id, newKeys))
+            ? origRoom
+            : existingRooms.find(r => isFree(roomOcc, r.id, newKeys));
+          if (!newRoom) continue;
+
+          // ── Commit the move ───────────────────────────────────────────────
+          if (entry.facultyId) markBusy(facultyOcc, entry.facultyId, newKeys);
+          gids.forEach(gid => {
+            markBusy(cohortOcc, gid, newKeys);
+            const kNew = `${gid}~${tDay}`;
+            const kOld = `${gid}~${entry.day}`;
+            cohortDaySessionCount.set(kNew, (cohortDaySessionCount.get(kNew) ?? 0) + 1);
+            cohortDaySessionCount.set(kOld, Math.max(0, (cohortDaySessionCount.get(kOld) ?? 1) - 1));
+            snap.set(kNew, (snap.get(kNew) ?? 0) + 1);
+            snap.set(kOld, Math.max(0, (snap.get(kOld) ?? 1) - 1));
+          });
+          markBusy(roomOcc, newRoom.id, newKeys);
+
+          entry.day       = tDay as typeof entry.day;
+          entry.startTime = startTime;
+          entry.endTime   = endTime;
+          entry.roomId    = newRoom.id;
+          moved    = true;
+          improved = true;
+          break outer;
+        }
+      }
+
+      if (!moved) {
+        // Couldn't relocate — restore original occupancy
+        if (entry.facultyId) markBusy(facultyOcc, entry.facultyId, oldKeys);
+        gids.forEach(gid => markBusy(cohortOcc, gid, oldKeys));
+        if (entry.roomId)    markBusy(roomOcc,    entry.roomId,    oldKeys);
+      }
+    }
+    if (!improved) break; // no moves made — further sweeps won't help
   }
 
   return {

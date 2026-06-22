@@ -262,7 +262,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         _module_id: newItem._module_id, _unique_name: newItem._unique_name,
         _name: newItem._name, _academic_year: newItem._academic_year, Semester: newItem.Semester
       };
-      onUploadCourses([...courses, item as any]);
+      onUploadCourses([...courses.filter(c => c.id !== item.id), item as any]);
     } else if (activeTab === 'Faculties') {
       const item: any = {
         ...termTag,
@@ -275,7 +275,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         _staff_id: newItem._staff_id, _Faculty_ID: newItem._Faculty_ID,
         _Faculty_name: newItem._Faculty_name, _deptName: newItem._deptName, _email: newItem._email
       };
-      onUploadFaculties([...faculties, item]);
+      onUploadFaculties([...faculties.filter(f => f.id !== item.id), item]);
     } else if (activeTab === 'Rooms') {
       const uniqueName = newItem._unique_name || newItem._room_id || `R-${Date.now()}`;
       const item: any = {
@@ -286,7 +286,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         _room_id: newItem._room_id, _unique_name: newItem._unique_name,
         _name: newItem._name, _custom1: newItem._custom1, _custom2: newItem._custom2
       };
-      onUploadRooms([...rooms, item]);
+      onUploadRooms([...rooms.filter(r => r.id !== item.id), item]);
     } else if (activeTab === 'Cohorts') {
       const uniqueName = newItem._unique_name || newItem._cohort_id || `C-${Date.now()}`;
       const item: any = {
@@ -296,7 +296,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         program: 'General', semester: 1, studentCount: 30,
         _cohort_id: newItem._cohort_id, _unique_name: newItem._unique_name, _name: newItem._name
       };
-      onUploadCohorts([...cohorts, item]);
+      onUploadCohorts([...cohorts.filter(g => g.id !== item.id), item]);
     }
     setNewItem({});
   };

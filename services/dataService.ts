@@ -265,8 +265,20 @@ export class DataService {
 
     const sanitized = itemsToSync.map(item => this.sanitize(tableName, item, termId));
 
-    if (sanitized.length > 0) {
-      const upsertErr = await this.upsertBatch(tableName, sanitized, onProgress);
+    // Deduplicate by ID to prevent Postgres Code: 21000 (ON CONFLICT DO UPDATE cannot affect row a second time)
+    const uniqueSanitized = [];
+    const seenIds = new Set();
+    // Traverse backwards to keep the most recent (last) version of any duplicate ID
+    for (let i = sanitized.length - 1; i >= 0; i--) {
+      const item = sanitized[i];
+      if (item && item.id && !seenIds.has(item.id)) {
+        seenIds.add(item.id);
+        uniqueSanitized.unshift(item);
+      }
+    }
+
+    if (uniqueSanitized.length > 0) {
+      const upsertErr = await this.upsertBatch(tableName, uniqueSanitized, onProgress);
       // Refresh the timestamp after the (potentially long) upload finishes
       this.lastWriteTimestamp = Date.now();
 

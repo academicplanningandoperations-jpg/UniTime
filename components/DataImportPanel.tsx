@@ -166,8 +166,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
           };
         }
         if (activeImportType === 'Cohorts') {
-          // Accept both app format (_unique_name) and Supabase format (name, program, semester)
-          const uniqueName = item._unique_name || item._cohort_id || item.name || `C${i}`;
+          const uniqueName = item._unique_name || item._cohort_id || (item.name ? `${item.name}-${i}` : `C${i}`);
           const displayName = item._name || item._unique_name || item.name || 'Unknown Cohort';
           return {
             ...termTag,
@@ -288,7 +287,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       };
       onUploadRooms([...rooms.filter(r => r.id !== item.id), item]);
     } else if (activeTab === 'Cohorts') {
-      const uniqueName = newItem._unique_name || newItem._cohort_id || `C-${Date.now()}`;
+      const uniqueName = newItem._unique_name || newItem._cohort_id || (newItem._name ? `${newItem._name}-${Date.now()}` : `C-${Date.now()}`);
       const item: any = {
         ...termTag,
         id: makeManualId('g', uniqueName),

@@ -161,8 +161,19 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
                     label="CATEGORY"
                     icon={<Zap className="w-3.5 h-3.5" />}
                     options={[
+                      { id: 'Explo', name: 'Explo' },
+                      { id: 'meeting', name: 'meeting' },
                       { id: 'Theory', name: 'Theory' },
-                      { id: 'Lab', name: 'Lab' },
+                      { id: 'LAB', name: 'LAB' },
+                      { id: 'Online Class', name: 'Online Class' },
+                      { id: 'Tut', name: 'Tut' },
+                      { id: 'Minor', name: 'Minor' },
+                      { id: 'Elective', name: 'Elective' },
+                      { id: 'Hons', name: 'Hons' },
+                      { id: 'PE1', name: 'PE1' },
+                      { id: 'PE2', name: 'PE2' },
+                      { id: 'PE3', name: 'PE3' },
+                      { id: 'Mid Sem Sub', name: 'Mid Sem Sub' },
                       { id: 'Seminar', name: 'Seminar' },
                       { id: 'Workshop', name: 'Workshop' },
                     ]}

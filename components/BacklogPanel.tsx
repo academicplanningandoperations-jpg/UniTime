@@ -24,7 +24,6 @@ interface ProgramCourse {
   semester: number;
   course: string;
   credits: number;
-  semTotalCredits: number;
 }
 
 interface TTSession {
@@ -123,7 +122,6 @@ function parseProgramCourses(rows: Record<string, unknown>[]): ProgramCourse[] {
     semester: parseSem(col(r, 'Semester', 'SEM', 'sem', 'SEMESTER')),
     course: col(r, 'Course', 'COURSE', 'Course ID', 'CourseID', 'course_id', 'Course Code', 'Subject Code', 'Subject'),
     credits: parseFloat(col(r, 'Credits', 'CREDITS', 'Credit', 'credit')) || 0,
-    semTotalCredits: parseFloat(col(r, 'Semester Total Credits', 'SemesterTotalCredits', 'Sem Total Credits', 'Sem Total', 'Total Sem Credits')) || 0,
   }));
 }
 
@@ -287,10 +285,11 @@ function computeAll(grades: GradeRow[], programCourses: ProgramCourse[], tt: TTS
     } else {
       const sem1fails = sg.filter(g => g.semester === 1 && g.status === 'FAIL');
       if (sem1fails.length > 0) {
-        // Budget = min(27, program's Sem 3 total credits as declared in course master)
-        const sem3Rows = programCourses.filter(pc => pc.programCode === first.programCode && pc.semester === 3);
-        const declaredTotal = sem3Rows[0]?.semTotalCredits || 0;
-        const budget = declaredTotal > 0 ? Math.min(27, declaredTotal) : 27;
+        // Budget = min(27, sum of all Sem 3 course credits for this program in the master)
+        const sem3Credits = programCourses
+          .filter(pc => pc.programCode === first.programCode && pc.semester === 3)
+          .reduce((s, pc) => s + pc.credits, 0);
+        const budget = sem3Credits > 0 ? Math.min(27, sem3Credits) : 27;
         allocateBacklogs(sid, first.studentName, first.programCode, first.programName, sem1fails, 3, programCourses, tt, rows, budget);
       }
     }
@@ -332,12 +331,12 @@ function dlTemplate(type: 1 | 2) {
     sheetName = 'Student Grades'; fileName = 'Template_StudentGrades.xlsx';
   } else {
     ws = XLSX.utils.aoa_to_sheet([
-      ['Program Code', 'Program Name', 'Semester', 'Course', 'Credits', 'Semester Total Credits'],
-      ['BCA', 'Bachelor of Computer Applications', 1, 'MATH101', 4, 20],
-      ['BCA', 'Bachelor of Computer Applications', 1, 'CS101', 3, 20],
-      ['BCA', 'Bachelor of Computer Applications', 2, 'PHYS201', 4, 22],
-      ['BCA', 'Bachelor of Computer Applications', 3, 'DBMS301', 4, 20],
-      ['BCA', 'Bachelor of Computer Applications', 3, 'OS301', 3, 20],
+      ['Program Code', 'Program Name', 'Semester', 'Course', 'Credits'],
+      ['BCA', 'Bachelor of Computer Applications', 1, 'MATH101', 4],
+      ['BCA', 'Bachelor of Computer Applications', 1, 'CS101', 3],
+      ['BCA', 'Bachelor of Computer Applications', 2, 'PHYS201', 4],
+      ['BCA', 'Bachelor of Computer Applications', 3, 'DBMS301', 4],
+      ['BCA', 'Bachelor of Computer Applications', 3, 'OS301', 3],
     ]);
     sheetName = 'Program Courses'; fileName = 'Template_ProgramCourseMaster.xlsx';
   }
@@ -554,7 +553,7 @@ const BacklogPanel: React.FC = () => {
             number={2}
             title="Program Course Master"
             description="Full course structure — which courses belong to which program and semester"
-            columns={['Program Code', 'Program Name', 'Semester', 'Course', 'Credits', 'Semester Total Credits']}
+            columns={['Program Code', 'Program Name', 'Semester', 'Course', 'Credits']}
             file={files.f2}
             inputRef={ref2}
             onFileChange={f => setFiles(prev => ({ ...prev, f2: f }))}

@@ -81,7 +81,16 @@ const App: React.FC = () => {
     return !!supabase || isSkipped;
   });
 
-  const [viewingTermId, setViewingTermId] = useState<string | null>(null);
+  // The term THIS person is working in. Everyone picks their own (top bar), so
+  // part of the team can build next semester while others keep editing the
+  // current one. Remembered per browser; falls back to the default term.
+  const [viewingTermId, setViewingTermId] = useState<string | null>(() => {
+    try { return localStorage.getItem('unitime_working_term') || null; } catch { return null; }
+  });
+  const switchTerm = (id: string) => {
+    try { localStorage.setItem('unitime_working_term', id); } catch { /* private mode */ }
+    setViewingTermId(id);
+  };
 
   // Initialise users from localStorage so we don't fall back to MOCK_USERS
   // when Supabase is temporarily unavailable — avoids username constraint conflicts.
@@ -141,22 +150,19 @@ const App: React.FC = () => {
   // ✅ FIX: effectiveActiveTerm moved here, BEFORE the useEffect that references it.
   // Previously it was declared after the hooks (line 543), causing a
   // "Cannot access before initialization" crash in the bundled output.
-  const effectiveActiveTerm = viewingTermId
-    ? terms.find(t => t.id === viewingTermId)
-    : terms.find(t => t.isActive);
+  // (If the remembered term no longer exists, use the default term.)
+  const effectiveActiveTerm =
+    (viewingTermId ? terms.find(t => t.id === viewingTermId) : undefined) ?? terms.find(t => t.isActive);
 
-  // ── Term safety: edits are only allowed in the ACTIVE term ──────────────────
-  // Viewing an older term is read-only, so a past term's timetable and data can't
-  // be changed by accident while you're looking at it. Every edit handler calls
-  // canWrite() first. It reads a ref because some panels hold older copies of
-  // these handlers (they skip re-rendering when only callbacks change).
-  const activeTerm = terms.find(t => t.isActive);
+  // ── Term safety ─────────────────────────────────────────────────────────────
+  // Every term is editable, and every edit goes ONLY into the term chosen in the
+  // top bar: data is loaded, saved and synced per term, so terms never mix. The
+  // only time saving is blocked is when no term is loaded at all. canWrite()
+  // reads a ref because some panels hold older copies of these handlers (they
+  // skip re-rendering when only callbacks change).
   const writeBlockReason: string | null = !effectiveActiveTerm
     ? 'No academic term is loaded yet, so nothing can be saved. Please refresh the page.'
-    : (viewingTermId && viewingTermId !== activeTerm?.id)
-      ? `You are viewing "${effectiveActiveTerm.name}", which is not the active term. ` +
-        `Past terms are read-only so their data stays safe — switch back to the active term to make changes.`
-      : null;
+    : null;
   const writeBlockReasonRef = useRef<string | null>(writeBlockReason);
   writeBlockReasonRef.current = writeBlockReason;
   const canWrite = (): boolean => {
@@ -186,9 +192,13 @@ const App: React.FC = () => {
         setTerms(t);
 
         // Step 2: Derive the real active termId from the freshly loaded terms.
-        const realActiveTermId = viewingTermId
-          ? t.find(term => term.id === viewingTermId)?.id
-          : t.find(term => term.isActive)?.id;
+        const realActiveTermId =
+          (viewingTermId ? t.find(term => term.id === viewingTermId)?.id : undefined)
+          ?? t.find(term => term.isActive)?.id;
+        // Pin this session to that term. If an admin later changes the default
+        // term, people already working are NOT moved to it mid-edit — they stay
+        // where they are until they switch themselves (or open the app afresh).
+        if (realActiveTermId && realActiveTermId !== viewingTermId) setViewingTermId(realActiveTermId);
 
         // Keep the ref current so realtime callbacks always use the correct id.
         activeTermIdRef.current = realActiveTermId;
@@ -368,6 +378,9 @@ const App: React.FC = () => {
     undoStackRef.current = [];
     redoStackRef.current = [];
     syncHistoryState();
+    // Rooms/faculty/cohorts are separate records in each term, so whatever was
+    // picked in the timetable windows doesn't exist in the new term.
+    setPanels(prev => prev.map(p => ({ ...p, viewId: '' })));
 
     const reloadForTerm = async () => {
       setIsSyncing(true);
@@ -1008,7 +1021,7 @@ const App: React.FC = () => {
         format: 'a4'
       });
 
-      const activeTerm = terms.find(t => t.isActive);
+      const activeTerm = effectiveActiveTerm; // the term on screen, not the default one
       const dateStr = new Date().toLocaleDateString();
 
       // Title Page
@@ -1228,6 +1241,9 @@ const App: React.FC = () => {
         onLogout={() => { setCurrentUser(null); resetUIState(); }}
         isSupabaseConnected={isSupabaseConfigured}
         activeTermName={effectiveActiveTerm?.name}
+        terms={terms}
+        currentTermId={effectiveActiveTerm?.id}
+        onSwitchTerm={switchTerm}
         onAddPanel={addPanel}
         onAutoTile={handleAutoTile}
         onRoomFinder={() => setIsRoomToolOpen(true)}
@@ -1303,7 +1319,7 @@ const App: React.FC = () => {
             </div>
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} onDeleteMultiple={handleDeleteMultipleSessions} />}
-          {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
+          {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { switchTerm(id); setActiveTab('dashboard'); }} viewingTermId={effectiveActiveTerm?.id ?? null} />}
           {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} cohorts={groups} schedule={schedule} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadCohorts={handleUpdateGroups} onRestoreSchedule={handleSaveSession} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} terms={terms} onUpdateRecord={handleUpdateRecord} onTransferFacultyLoad={handleTransferFacultyLoad} onCopyFromTerm={handleCopyRegistryFromTerm} readOnlyReason={writeBlockReason} />}
           {/* Keep AutoSchedulePanel always mounted (never unmounts on tab switch) so that
               uploaded files, generated results, and progress state are never lost. */}

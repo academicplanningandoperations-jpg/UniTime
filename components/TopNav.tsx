@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Wrench, ChevronDown, Save, LogOut, FileText, FileUp, Users, MapPin, GraduationCap, BookOpen, LayoutGrid, Cloud, Menu, X
 } from 'lucide-react';
-import { Role, UserAccount, ViewType } from '../types';
+import { Role, UserAccount, ViewType, Term } from '../types';
 import Logo from './Logo';
 
 interface TopNavProps {
@@ -13,6 +13,9 @@ interface TopNavProps {
   onLogout: () => void;
   isSupabaseConnected?: boolean;
   activeTermName?: string;
+  terms?: Term[];
+  currentTermId?: string;
+  onSwitchTerm?: (termId: string) => void;
   onAddPanel?: (type: ViewType) => void;
   onAutoTile?: () => void;
   onRoomFinder?: () => void;
@@ -27,12 +30,37 @@ const TopNav: React.FC<TopNavProps> = ({
   onLogout,
   isSupabaseConnected = false,
   activeTermName = 'No Term',
+  terms = [],
+  currentTermId,
+  onSwitchTerm,
   onAddPanel,
   onAutoTile,
   onRoomFinder,
   onExportPDF,
   onExportExcel,
 }) => {
+  // Term switcher — every edit, upload and report applies to the term chosen here.
+  // The choice is per person (remembered on this computer); it doesn't change
+  // which term anyone else is working in.
+  const termSwitcher = (compact: boolean) => terms.length === 0 ? null : (
+    <label
+      className={`flex items-center gap-1.5 bg-[#fff7d6] text-[#7a4f00] border border-[#e0b100] font-bold ${compact ? 'px-2 py-1 text-[11px] w-full' : 'px-2 py-0.5 text-[11px]'}`}
+      title="The term you are working in. Everything you add or change goes into this term."
+    >
+      <span className="uppercase tracking-widest text-[9px]">Term</span>
+      <select
+        value={currentTermId ?? ''}
+        onChange={e => e.target.value && onSwitchTerm?.(e.target.value)}
+        className={`bg-transparent font-bold outline-none cursor-pointer text-[#7a4f00] ${compact ? 'flex-1' : 'max-w-[190px]'}`}
+      >
+        {!currentTermId && <option value="">{activeTermName}</option>}
+        {terms.map(t => (
+          <option key={t.id} value={t.id} className="text-black">{t.name}{t.isActive ? ' (default)' : ''}</option>
+        ))}
+      </select>
+    </label>
+  );
+
   const [isToolsOpen, setIsToolsOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -143,6 +171,7 @@ const TopNav: React.FC<TopNavProps> = ({
         </div>
 
         <div className="flex items-center gap-3 h-full pb-[2px]">
+          {termSwitcher(false)}
           {isSupabaseConnected && (
             <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[#eafbef] text-[#2e7d32] border border-[#a5d6a7] text-[10px] uppercase font-bold">
               <Cloud className="w-3 h-3" /> SYNC
@@ -206,6 +235,8 @@ const TopNav: React.FC<TopNavProps> = ({
                   <LogOut className="w-3 h-3" /> Sign Out
                 </button>
               </div>
+
+              <div className="px-4 py-2 border-b border-[#dbeafe]">{termSwitcher(true)}</div>
 
               {/* Nav sections */}
               <div className="divide-y divide-[#f1f5f9]">

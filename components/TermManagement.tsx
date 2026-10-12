@@ -31,14 +31,15 @@ const TermManagement: React.FC<TermManagementProps> = ({ terms, onUpdateTerms, c
   const handleToggleActive = (id: string) => {
     const next = terms.find(t => t.id === id);
     const current = terms.find(t => t.isActive);
-    // Switching the active term changes it for EVERY user at once: everyone's
-    // timetable, uploads and auto-scheduling move to the new term, and the old
-    // one becomes read-only. Its data is kept exactly as it is.
+    // The default term is only the one the app OPENS in for people who haven't
+    // picked a term themselves. Every term stays fully editable, and each person
+    // switches with the Term box in the top bar.
     if (!confirm(
-      `Make "${next?.name}" the active term for everyone?\n\n` +
-      `• All users will start working in "${next?.name}".\n` +
-      (current ? `• "${current.name}" becomes read-only. Its data is kept and can still be viewed.\n` : '') +
-      `\nYou can switch back at any time.`
+      `Make "${next?.name}" the default term?\n\n` +
+      `• The app will open in "${next?.name}" for anyone who hasn't chosen a term.\n` +
+      `• People who are working right now stay in the term they are in.\n` +
+      (current ? `• "${current.name}" stays fully editable — pick it from the Term box in the top bar.\n` : '') +
+      `\nYou can change the default again at any time.`
     )) return;
     onUpdateTerms(terms.map(t => ({ ...t, isActive: t.id === id })));
   };
@@ -93,7 +94,7 @@ const TermManagement: React.FC<TermManagementProps> = ({ terms, onUpdateTerms, c
     const term = terms.find(t => t.id === id);
     if (!term) return;
     if (term.isActive) {
-      alert(`"${term.name}" is the active term and can't be deleted.\n\nMake another term active first if you really need to remove it.`);
+      alert(`"${term.name}" is the default term and can't be deleted.\n\nMake another term the default first if you really need to remove it.`);
       return;
     }
     const typed = prompt(
@@ -152,7 +153,7 @@ const TermManagement: React.FC<TermManagementProps> = ({ terms, onUpdateTerms, c
                   <div className="flex-1 min-w-0">
                     {term.isActive && (
                       <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-white bg-white/20 border border-white/30 px-2 py-0.5 mb-2">
-                        <Sparkles className="w-2.5 h-2.5" /> Active
+                        <Sparkles className="w-2.5 h-2.5" /> Default
                       </span>
                     )}
                     <h3 className="text-[15px] font-black text-white leading-tight truncate">{term.name}</h3>
@@ -200,7 +201,7 @@ const TermManagement: React.FC<TermManagementProps> = ({ terms, onUpdateTerms, c
                     }`}
                     style={isViewing ? { background: grad } : {}}
                   >
-                    {isViewing ? 'Currently Viewing' : 'View Timetable'}
+                    {isViewing ? 'You are working here' : 'Work in this term'}
                     {!isViewing && <ArrowRight className="w-3 h-3" />}
                   </button>
 
@@ -209,7 +210,7 @@ const TermManagement: React.FC<TermManagementProps> = ({ terms, onUpdateTerms, c
                       onClick={() => handleToggleActive(term.id)}
                       className="w-full py-1.5 text-[10px] font-bold uppercase tracking-widest text-[#64748b] border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#f1f5f9] hover:text-[#334155] transition-colors"
                     >
-                      Set as Active
+                      Set as Default
                     </button>
                   )}
                 </div>

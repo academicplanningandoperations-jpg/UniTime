@@ -1,5 +1,6 @@
 import { ScheduleEntry, Faculty, Room, StudentGroup, Clash } from '../types';
 import { supabase } from './supabase';
+import { areParallelElectives } from '../utils/electives';
 
 // ─── Schema whitelist ─────────────────────────────────────────────────────────
 // Only these columns are sent to Supabase. Any extra React-only fields are stripped.
@@ -556,7 +557,12 @@ export class DataService {
           const sameRoom = !!b.e.roomId && b.e.roomId === a.e.roomId;
           const sameFaculty = !!b.e.facultyId && b.e.facultyId === a.e.facultyId;
           const aGroups = a.e.groupIds || [];
-          const sharedGroups = bGroups.filter(g => aGroups.includes(g));
+          // Courses of the same elective basket ("PE1 Theory" + "PE1 Theory") are
+          // meant to run together for a cohort — each student attends only one —
+          // so a shared cohort is not a clash there. Room/faculty still are.
+          const sharedGroups = areParallelElectives(a.e.category, b.e.category)
+            ? []
+            : bGroups.filter(g => aGroups.includes(g));
           if (!sameRoom && !sameFaculty && sharedGroups.length === 0) continue;
 
           const overlap: number[] = [];

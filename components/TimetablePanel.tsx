@@ -5,6 +5,7 @@ import { ScheduleEntry, ViewType, Room, Faculty, StudentGroup, Course, DayOfWeek
 import { Minus, Square, X, FolderSync, CalendarCheck, AlertTriangle, Search, ChevronDown, Plus, Calendar, Clock, Zap, Users, User, MapPin, Undo2, Redo2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatTime12h } from '../services/utils';
+import { areParallelElectives, baseCategory } from '../utils/electives';
 
 const TYPE_THEMES = {
   Room:    { headerGrad: 'linear-gradient(135deg, #0e7490 0%, #06b6d4 100%)', borderColor: '#06b6d4', entryColor: '#0891b2', entryBorder: '#0e7490', accent: '#06b6d4' },
@@ -24,7 +25,8 @@ const SESSION_TYPE_COLORS: Record<string, { bg: string; border: string; text: st
 
 function getSessionColors(category: string | undefined) {
   if (!category) return null;
-  return SESSION_TYPE_COLORS[category.toLowerCase()] ?? null;
+  // "PE1 Lab" is coloured like a Lab.
+  return SESSION_TYPE_COLORS[category.toLowerCase()] ?? SESSION_TYPE_COLORS[baseCategory(category)] ?? null;
 }
 
 const getDayDate = (dayIndex: number, week: number) => {
@@ -222,7 +224,9 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
           return (
             (!!dragEntry.facultyId && e.facultyId === dragEntry.facultyId) ||
             (!!dragEntry.roomId    && e.roomId    === dragEntry.roomId)    ||
-            (dragEntry.groupIds?.some((gid: string) => e.groupIds?.includes(gid)) ?? false)
+            // sharing a cohort is fine between courses of the same elective basket
+            (!areParallelElectives(dragEntry.category, e.category) &&
+              (dragEntry.groupIds?.some((gid: string) => e.groupIds?.includes(gid)) ?? false))
           );
         });
 
@@ -717,7 +721,14 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                             const course = courses.find(c => c.id === entry.courseId);
                             const slots = getSlotCount(entry.startTime, entry.endTime);
                             const sessionColors = getSessionColors(entry.category);
-                            const hasConflict = cellEntries.length > 1;
+                            // Several sessions in one cell are a clash — unless they are
+                            // parallel courses of one elective basket with different
+                            // rooms and faculty (students each attend only one of them).
+                            const hasConflict = cellEntries.some(o => o !== entry && (
+                              !areParallelElectives(o.category, entry.category) ||
+                              (!!entry.roomId && o.roomId === entry.roomId) ||
+                              (!!entry.facultyId && o.facultyId === entry.facultyId)
+                            ));
                             const cascadeX = index * 4;
                             const cascadeY = index * 4;
 

@@ -118,7 +118,7 @@ const COLS: [string, string, string, string, string][] = [
   ['CourseCode',         'e.g. CS301',                 '#7c3aed', '#f5f3ff', '#ddd6fe'],
   ['CourseName',         'e.g. Data Structures',       '#7c3aed', '#f5f3ff', '#ddd6fe'],
   ['Credits',            '3 = 3 sessions/week',        '#059669', '#ecfdf5', '#a7f3d0'],
-  ['Category',           'Theory/Lab/Studio/MBA/Edge',  '#059669', '#ecfdf5', '#a7f3d0'],
+  ['Category',           'Theory/Lab/Studio/MBA/Edge — or "PE1 Theory" / "PE1 Lab" for elective baskets',  '#059669', '#ecfdf5', '#a7f3d0'],
   ['Campus',             'K1, K2, AB, RD…',           '#0891b2', '#ecfeff', '#a5f3fc'],
   ['Cohort1–12',         'shared cohorts on one row',  '#0891b2', '#ecfeff', '#a5f3fc'],
   ['FixedRoom',          'locks to this exact room',   '#d97706', '#fffbeb', '#fde68a'],
@@ -361,7 +361,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </button>
               </div>
               <p className="text-[9px] text-[#4338ca] leading-relaxed bg-[#eef2ff] border border-[#c7d2fe] px-2 py-1.5">
-                Leave <strong>FacultyWorkingDays</strong> blank to use the default days set in Step 3. Explicit "Mon-Fri" or "Tue-Sat" values are always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt). <strong>CohortLunchStart</strong>: "13" fixes lunch every day; "12-14" rotates lunch across Mon→Sat (e.g. Mon=12, Tue=13) for extra packing flexibility. <strong>CohortTimeStart / CohortTimeEnd</strong> (optional): keeps a cohort's classes inside that part of the day — e.g. Sem 2 = 8 to 13, Sem 4 = 13 to 18 so the two never overlap. Fill it once per cohort; it applies to every row with that cohort. FacultyTimeStart/End must also cover the window.
+                Leave <strong>FacultyWorkingDays</strong> blank to use the default days set in Step 3. Explicit "Mon-Fri" or "Tue-Sat" values are always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt). <strong>CohortLunchStart</strong>: "13" fixes lunch every day; "12-14" rotates lunch across Mon→Sat (e.g. Mon=12, Tue=13) for extra packing flexibility. <strong>Elective baskets</strong>: give the choices of one elective the same Category with a numbered code — e.g. Physics and Chemistry both "PE1 Theory" (labs: "PE1 Lab"). For a cohort they share, those courses are scheduled at the same time (different faculty and rooms) and are not counted as a cohort clash. <strong>CohortTimeStart / CohortTimeEnd</strong> (optional): keeps a cohort's classes inside that part of the day — e.g. Sem 2 = 8 to 13, Sem 4 = 13 to 18 so the two never overlap. Fill it once per cohort; it applies to every row with that cohort. FacultyTimeStart/End must also cover the window.
               </p>
             </div>
           </div>

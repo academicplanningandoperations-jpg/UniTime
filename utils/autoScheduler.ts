@@ -1,4 +1,5 @@
 import type { Course, Faculty, Room, StudentGroup, ScheduleEntry } from '../types';
+import { parseElective, baseCategory } from './electives';
 
 export interface CourseAssignment {
   facultyId: string;
@@ -538,11 +539,22 @@ export async function runAutoScheduler(
   // Also seeds cohortDaySessionCount so that incremental scheduling does not
   // ignore activity placed by a previous run when choosing day tiers.
   const cohortDaySessionCount = new Map<string, number>();
+  // Elective baskets ("PE1 Theory", "PE1 Lab" …): which basket holds a cohort's
+  // slot. Courses of the SAME basket may share that slot for the cohort, because
+  // each student takes only one of them. Key: `${cohortId}|${slotKey}` → basket
+  // key; '#' marks a slot also used by an ordinary session (never shareable).
+  const electiveSlot = new Map<string, string>();
   for (const entry of existingSchedule) {
     if (entry.termId !== termId) continue;
     const keys = slotKeys(entry.day, entry.startTime, entry.endTime);
     if (entry.facultyId) markBusy(facultyOcc, entry.facultyId, keys);
+    const existingElective = parseElective(entry.category);
     entry.groupIds?.forEach(gid => {
+      keys.forEach(sk => {
+        const ek = `${gid}|${sk}`;
+        if (!existingElective) electiveSlot.set(ek, '#');
+        else if (!electiveSlot.has(ek)) electiveSlot.set(ek, existingElective.key);
+      });
       markBusy(cohortOcc, gid, keys);
       const k = `${gid}~${entry.day}`;
       cohortDaySessionCount.set(k, (cohortDaySessionCount.get(k) ?? 0) + 1);
@@ -628,8 +640,8 @@ export async function runAutoScheduler(
     const aW = hasCohortWindow(a) ? 0 : 1;
     const bW = hasCohortWindow(b) ? 0 : 1;
     if (aW !== bW) return aW - bW;
-    const al = a.category.toLowerCase() === 'lab' ? 0 : 1;
-    const bl = b.category.toLowerCase() === 'lab' ? 0 : 1;
+    const al = baseCategory(a.category) === 'lab' ? 0 : 1;
+    const bl = baseCategory(b.category) === 'lab' ? 0 : 1;
     if (al !== bl) return al - bl;
     if (al === 0) {
       const ah = a.labHours || 2, bh = b.labHours || 2;
@@ -643,7 +655,9 @@ export async function runAutoScheduler(
 
   for (let ai = 0; ai < sorted.length; ai++) {
     const asgn = sorted[ai];
-    const cat           = asgn.category.toLowerCase();
+    // "PE1 Lab" behaves as a Lab (duration, room type) that belongs to basket PE1.
+    const elective      = parseElective(asgn.category);
+    const cat           = elective ? elective.base : asgn.category.toLowerCase();
     const isLab         = cat === 'lab';
     const isMBA         = cat === 'mba';   // 1.5-hour sessions; sessionsNeeded = round(credits/1.5)
     const isEdge        = cat === 'edge';  // 2-hour sessions; sessionsNeeded = round(credits/2)
@@ -766,7 +780,26 @@ export async function runAutoScheduler(
     const cS1 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) === 1));
     const cS3 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) >= 3));
     const cS0 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) === 0));
-    const candidates = [...cS2, ...cS1, ...cS3, ...cS0];
+    const tiered = [...cS2, ...cS1, ...cS3, ...cS0];
+
+    // Elective basket: a slot the cohort already uses for another course of the
+    // same basket counts as free, and such slots are tried FIRST so the basket's
+    // courses line up at the same time instead of spreading across the week.
+    const inBasket = (gid: string, keys: string[]) =>
+      !!elective && keys.every(k => electiveSlot.get(`${gid}|${k}`) === elective.key);
+    const cohortFree = (gid: string, keys: string[]) => {
+      const s = cohortOcc.get(gid);
+      return !s || keys.every(k => !s.has(k) || (!!elective && electiveSlot.get(`${gid}|${k}`) === elective.key));
+    };
+    let candidates = tiered;
+    if (elective && groups.length > 0) {
+      const joining: typeof tiered = [], rest: typeof tiered = [];
+      for (const c of tiered) {
+        const keys = slotKeys(c.day, c.startTime, c.endTime);
+        (groups.some(g => inBasket(g.id, keys)) ? joining : rest).push(c);
+      }
+      candidates = [...joining, ...rest];
+    }
 
     // Candidates that passed faculty/cohort/consecutive-hours checks but had no
     // room available AT THAT SPECIFIC slot. Saved instead of committed immediately,
@@ -799,7 +832,7 @@ export async function runAutoScheduler(
       const typeMatched = campusRooms.filter(r => {
         const t = (r.type || '').toLowerCase();
         if (isLab) return t.includes('lab');
-        if (asgn.category.toLowerCase() === 'studio') return t.includes('studio');
+        if (cat === 'studio') return t.includes('studio');
         return !t.includes('lab') && !t.includes('studio') && !t.includes('audit');
       });
       return typeMatched.find(r => isFree(roomOcc, r.id, keys)) ?? campusRooms.find(r => isFree(roomOcc, r.id, keys));
@@ -812,7 +845,11 @@ export async function runAutoScheduler(
         if (!isLab) markBusy(facultyNonLabOcc, faculty.id, keys);
       }
       groups.forEach(g => {
+        // Joining a slot the basket already holds adds no new class time for the cohort.
+        const sharedSlot = inBasket(g.id, keys);
         markBusy(cohortOcc, g.id, keys);
+        if (elective) keys.forEach(k => electiveSlot.set(`${g.id}|${k}`, elective.key));
+        if (sharedSlot) return;
         const dk = `${g.id}~${day}`;
         cohortDaySessionCount.set(dk, (cohortDaySessionCount.get(dk) ?? 0) + 1);
       });
@@ -850,7 +887,7 @@ export async function runAutoScheduler(
       const keys = slotKeys(day, startTime, endTime);
 
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
-      if (groups.some(g => !isFree(cohortOcc, g.id, keys))) { rejCohort++; continue; }
+      if (groups.some(g => !cohortFree(g.id, keys))) { rejCohort++; continue; }
       if (effLunch.length > 0 && groups.some(g => !leavesLunchFree(cohortOcc, g.id, day, effLunch, keys))) { rejCohort++; continue; }
       if (groups.some(g => wouldCreateLargeGap(cohortOcc, g.id, day, keys, 2, effLunch))) { rejCohort++; continue; }
       if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; continue; }
@@ -907,6 +944,9 @@ export async function runAutoScheduler(
       if (entry.termId !== termId) continue;
       const gids = entry.groupIds ?? [];
       if (gids.length === 0) continue;
+      // Elective-basket sessions stay put: moving one would pull it away from
+      // the other courses of its basket that share the slot.
+      if (parseElective(entry.category)) continue;
 
       // Only relocate if this is a lonely day (exactly 1 session) for ≥1 cohort
       if (!gids.some(gid => (snap.get(`${gid}~${entry.day}`) ?? 0) === 1)) continue;
@@ -1123,6 +1163,17 @@ export const COURSE_TEMPLATE_CSV = [
     ['CS-SEM4-A'], '','','','4',
     '','', '','', '','', '','',
     'Mon-Fri','8','18','13', '13','18'),
+  // Elective basket — Physics and Chemistry are both "PE1 Theory" for the same cohort:
+  // each student takes one of them, so they are scheduled at the SAME time with
+  // different faculty and rooms. Use "PE1 Lab" the same way for the lab choices.
+  _row('600007','Ravi Mehta','School of Engineering','PHY101','Physics','3','PE1 Theory','K1',
+    ['ME-Y1-A'], '','','','1',
+    '','', '','', '','', '','',
+    'Mon-Fri','8','16','13'),
+  _row('600008','Sara Khan','School of Engineering','CHE101','Chemistry','3','PE1 Theory','K1',
+    ['ME-Y1-A'], '','','','1',
+    '','', '','', '','', '','',
+    'Mon-Fri','8','16','13'),
 ].join('\n');
 
 export const ROOM_CAMPUS_TEMPLATE_CSV = [

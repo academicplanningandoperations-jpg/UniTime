@@ -3,6 +3,7 @@ import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { Course, Faculty, Room, StudentGroup, DayOfWeek, ScheduleEntry } from '../types';
 import { DAYS, TIME_SLOTS, TOTAL_WEEKS } from '../constants';
 import { SearchableDropdown, MultiSearchableDropdown } from './ui/Dropdowns';
+import { areParallelElectives } from '../utils/electives';
 import { 
   AlertCircle, BookOpen, Calendar, Check, ChevronDown, Clock, MapPin, RefreshCw, Search, User, Users, X, Zap 
 } from 'lucide-react';
@@ -154,7 +155,9 @@ const SessionModal: React.FC<SessionModalProps> = ({
         if (f && !conflicts.includes(`${f.name} is already teaching`)) conflicts.push(`${f.name} is already teaching`);
       }
       const entryGroups = entry.groupIds || [];
-      if (formData.groupIds && formData.groupIds.some(g => entryGroups.includes(g))) {
+      // Same elective basket (e.g. both "PE1 Theory") → running together is intended.
+      if (!areParallelElectives(formData.category, entry.category) &&
+          formData.groupIds && formData.groupIds.some(g => entryGroups.includes(g))) {
         const sharedGroups = groups.filter(g => formData.groupIds!.includes(g.id) && entryGroups.includes(g.id));
         sharedGroups.forEach(g => {
           const cohortName = (g as any)._unique_name || g.name;
@@ -166,7 +169,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
     }
     return conflicts;
   }, [isOpen, existingSchedule, formData.day, formData.startTime, formData.endTime, formData.weeks,
-      formData.roomId, formData.facultyId, formData.groupIds, initialData?.id, rooms, faculties, groups]);
+      formData.roomId, formData.facultyId, formData.groupIds, formData.category, initialData?.id, rooms, faculties, groups]);
 
   if (!isOpen) return null;
 

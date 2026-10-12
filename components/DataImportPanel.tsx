@@ -35,11 +35,26 @@ const EDIT_FIELDS: Record<RegistryTable, { key: string; label: string; type: 'te
   ],
   groups: [
     { key: 'name', label: 'Cohort Name / ID', type: 'text', identity: true },
-    { key: 'program', label: 'Program', type: 'text' },
+    { key: 'program', label: 'School', type: 'text' },
     { key: 'semester', label: 'Semester', type: 'number' },
     { key: 'studentCount', label: 'Student Count', type: 'number' },
   ],
 };
+
+// Cohort School / Semester. The cohort table has no "school" column, so School is
+// kept in the existing `program` field and Semester in `semester` (a number).
+// Accepts "SEM-3", "Sem 3", "3" → 3.
+const parseSemester = (raw: any): number | null => {
+  const m = String(raw ?? '').match(/\d+/);
+  return m ? Number(m[0]) : null;
+};
+// Reads a CSV cell by header name, ignoring case and a leading underscore.
+const pickColumn = (row: any, name: string): string => {
+  const want = name.toLowerCase();
+  const key = Object.keys(row).find(k => k.trim().replace(/^_/, '').toLowerCase() === want);
+  return key ? String(row[key] ?? '').trim() : '';
+};
+const cohortSchool = (g: any): string => (g?.program && g.program !== 'General') ? g.program : '';
 
 const toMinutes = (t: string) => {
   const [h, m] = String(t || '0:0').split(':').map(Number);
@@ -204,7 +219,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     Modules: "_module_id,_unique_name,_name,_academic_year,Semester\n1,CHCE2028_2,Chemical Technology,2025,SEM-3\n2,CS101,Intro to CS,2025,SEM-1",
     Faculties: "_staff_id,_Faculty_ID,_Faculty_name,_deptName,_email\n1,600001,SOCSVISITING 01,School of Business,SOCSVISITING01@mail.com\n2,600002,Alan Turing,Computer Science,alan@mail.com",
     Rooms: "_room_id,_unique_name,_name,_custom1,_custom2\n1,K1007,K1007,AYRQ18096,AYRQ18096\n2,L202,L202,LAB,LAB",
-    Cohorts: "_cohort_id,_unique_name,_name\n1,BCOM-H-ECOM&BI-V-B1,BCOM-H-ECOM&BI-V-B1\n2,CS-Y1-A,CS-Y1-A"
+    Cohorts: "_cohort_id,_unique_name,_name,School,Semester\n1,BCOM-H-ECOM&BI-V-B1,BCOM-H-ECOM&BI-V-B1,School of Business,SEM-5\n2,CS-Y1-A,CS-Y1-A,School of Computer Science,SEM-1"
   };
 
   // Filter displayed data to only this term
@@ -318,13 +333,17 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         if (activeImportType === 'Cohorts') {
           const uniqueName = item._unique_name || item._cohort_id || (item.name ? `${item.name}-${i}` : `C${i}`);
           const displayName = item._name || item._unique_name || item.name || 'Unknown Cohort';
+          const id = makeId('g', uniqueName, i);
+          // A file without School/Semester columns (the old template) must not
+          // blank out values already saved for the cohort.
+          const existing = cohorts.find(g => g.id === id);
           return {
             ...termTag,
-            id: makeId('g', uniqueName, i),
+            id,
             name: displayName,
-            program: item.program || 'General',
-            semester: item.semester || 1,
-            studentCount: item.studentCount || 0,
+            program: pickColumn(item, 'School') || item.program || existing?.program || 'General',
+            semester: parseSemester(pickColumn(item, 'Semester')) ?? existing?.semester ?? 1,
+            studentCount: item.studentCount || existing?.studentCount || 0,
             _cohort_id: item._cohort_id || item.id,
             _unique_name: item._unique_name || item.name,
             _name: item._name || item.name
@@ -442,7 +461,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         ...termTag,
         id: makeManualId('g', uniqueName),
         name: newItem._name || uniqueName,
-        program: 'General', semester: 1, studentCount: 30,
+        program: (newItem._school || '').trim() || 'General',
+        semester: parseSemester(newItem._semester) ?? 1, studentCount: 30,
         _cohort_id: newItem._cohort_id, _unique_name: newItem._unique_name, _name: newItem._name
       };
       onUploadCohorts([...cohorts.filter(g => g.id !== item.id), item]);
@@ -693,7 +713,9 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       }
       if (activeTab === 'Cohorts') {
         return (item._unique_name || item.name || '').toLowerCase().includes(q)
-          || (item._name || item.name || '').toLowerCase().includes(q);
+          || (item._name || item.name || '').toLowerCase().includes(q)
+          || cohortSchool(item).toLowerCase().includes(q)
+          || `sem-${item.semester || 1}`.includes(q);
       }
       return true;
     });
@@ -766,11 +788,13 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         item._custom2 || '',
       ]);
     } else if (activeTab === 'Cohorts') {
-      headers = ['_cohort_id', '_unique_name', '_name'];
+      headers = ['_cohort_id', '_unique_name', '_name', 'School', 'Semester'];
       rows = currentData.map((item: any) => [
         item._cohort_id || '',
         item._unique_name || item.name || '',
         item._name || item.name || '',
+        cohortSchool(item),
+        `SEM-${item.semester || 1}`,
       ]);
     }
 
@@ -832,6 +856,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         {checkboxTh}
         <th className="px-3 py-2 text-[11px] font-bold text-[#185baf] uppercase">Cohort ID (Unique)</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">_name</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">School</th>
+        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase">Semester</th>
         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase text-right">Actions</th>
       </tr>
     );
@@ -870,6 +896,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         {activeTab === 'Cohorts' && (<>
           <td className="px-3 py-2 font-bold text-[#185baf]">{item._unique_name || item.name || item.id}</td>
           <td className="px-3 py-2">{item._name || item.name}</td>
+          <td className="px-3 py-2">{cohortSchool(item) || '-'}</td>
+          <td className="px-3 py-2">SEM-{item.semester || 1}</td>
         </>)}
         <td className="px-3 py-2 text-right whitespace-nowrap">
           <button onClick={() => openEdit(TAB_TO_TABLE[activeTab as ImportType], item)}
@@ -941,6 +969,10 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         <input type="text" value={newItem._unique_name || ''} onChange={e => setNewItem({...newItem, _unique_name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. BCOM-H-ECOM&BI-V-B1" />
         <label className="text-[11px] font-bold text-[#333] uppercase">_name</label>
         <input type="text" value={newItem._name || ''} onChange={e => setNewItem({...newItem, _name: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. BCOM-H-ECOM&BI-V-B1" />
+        <label className="text-[11px] font-bold text-[#333] uppercase">School</label>
+        <input type="text" value={newItem._school || ''} onChange={e => setNewItem({...newItem, _school: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. School of Business" />
+        <label className="text-[11px] font-bold text-[#333] uppercase">Semester</label>
+        <input type="text" value={newItem._semester || ''} onChange={e => setNewItem({...newItem, _semester: e.target.value})} className="w-full bg-white border border-[#ccc] px-2 py-1.5 focus:border-[#185baf] outline-none text-xs" placeholder="e.g. SEM-5 or 5" />
       </div>
     );
   };

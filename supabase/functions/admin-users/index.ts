@@ -6,7 +6,8 @@
 //   { action: 'upsert', user: {id?, username, name, role, departmentScope}, password? }
 //   { action: 'delete', id }
 //   { action: 'migrate' }   one-time move of existing users into Supabase Auth;
-//                           needs header x-bootstrap-secret = BOOTSTRAP_SECRET
+//                           needs header x-bootstrap-secret = a code stored in
+//                           the locked admin_bootstrap table (used up on use)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 
 const USER_EMAIL_DOMAIN = 'users.unitime.app'; // must match services/authService.ts
@@ -69,18 +70,26 @@ Deno.serve(async (req) => {
 
     // ── One-time migration (bootstrap secret, not a user session) ────────────
     if (body.action === 'migrate') {
-      const secret = Deno.env.get('BOOTSTRAP_SECRET');
-      if (!secret || req.headers.get('x-bootstrap-secret') !== secret) return json({ error: 'Forbidden' }, 403);
+      // One-time code kept in a locked table (no browser can read it). It is
+      // deleted as soon as it is used, so the migration can't be run again.
+      const code = req.headers.get('x-bootstrap-secret') || '';
+      if (!code) return json({ error: 'Forbidden' }, 403);
+      const { data: hit } = await admin.from('admin_bootstrap').delete().eq('token', code).select('token');
+      if (!hit || hit.length === 0) return json({ error: 'Forbidden' }, 403);
       const { data: users, error } = await admin.from('users').select('*');
       if (error) throw error;
       const done: string[] = [];
+      const skipped: string[] = [];
       for (const u of users ?? []) {
         const pw = (u.password && String(u.password)) || null;
-        await syncAuthUser({ username: u.username, userId: u.id, role: u.role, password: pw ?? undefined });
-        if (pw) await savePassword(u.id, pw);
+        // No password on record (e.g. a new profile) → a Super Admin sets one
+        // later from the Admin panel, which creates the login then.
+        if (!pw) { skipped.push(u.username); continue; }
+        await syncAuthUser({ username: u.username, userId: u.id, role: u.role, password: pw });
+        await savePassword(u.id, pw);
         done.push(u.username);
       }
-      return json({ ok: true, migrated: done });
+      return json({ ok: true, migrated: done, skipped });
     }
 
     // ── Everything else: caller must be a signed-in SUPER_ADMIN ──────────────

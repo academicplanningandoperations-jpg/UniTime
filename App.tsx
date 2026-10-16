@@ -61,8 +61,12 @@ const App: React.FC = () => {
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
 
   // Undo/redo stacks — stored in refs so keyboard handler always sees current value
-  const undoStackRef = useRef<ScheduleEntry[][]>([]);
-  const redoStackRef = useRef<ScheduleEntry[][]>([]);
+  // Each step keeps the timetable as it was, plus the sessions SOMEONE ELSE has
+  // changed since then (arrived through realtime). Undo/redo never touch those,
+  // so undoing your own edit can't delete or revert a teammate's work.
+  type HistoryEntry = { snap: ScheduleEntry[]; foreign: Set<string> };
+  const undoStackRef = useRef<HistoryEntry[]>([]);
+  const redoStackRef = useRef<HistoryEntry[]>([]);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
@@ -72,9 +76,32 @@ const App: React.FC = () => {
   };
 
   const pushHistory = () => {
-    undoStackRef.current = [...undoStackRef.current.slice(-29), [...scheduleRef.current]];
+    undoStackRef.current = [...undoStackRef.current.slice(-29), { snap: [...scheduleRef.current], foreign: new Set() }];
     redoStackRef.current = [];
     syncHistoryState();
+  };
+  // Remember sessions changed by other people, so undo/redo leaves them alone.
+  const markForeignChanges = (ids: Iterable<string>) => {
+    const stacks = [...undoStackRef.current, ...redoStackRef.current];
+    if (stacks.length === 0) return;
+    for (const id of ids) for (const h of stacks) h.foreign.add(id);
+  };
+  // Apply a timetable read back from the server (refresh / realtime burst).
+  // Anything that differs from what's on screen was changed by someone else.
+  const applyServerSchedule = (next: ScheduleEntry[]) => {
+    if (undoStackRef.current.length + redoStackRef.current.length > 0) {
+      const prevById = new Map(scheduleRef.current.map(e => [e.id, e] as [string, ScheduleEntry]));
+      const changed: string[] = [];
+      const nextIds = new Set<string>();
+      for (const e of next) {
+        nextIds.add(e.id);
+        const p = prevById.get(e.id);
+        if (!p || JSON.stringify(p) !== JSON.stringify(e)) changed.push(e.id);
+      }
+      prevById.forEach((_, id) => { if (!nextIds.has(id)) changed.push(id); });
+      markForeignChanges(changed);
+    }
+    setScheduleAndRef(next);
   };
   const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(() => {
     const isSkipped = localStorage.getItem('unitime_skip_supabase') === 'true';
@@ -258,7 +285,7 @@ const App: React.FC = () => {
       };
 
       const refetchSchedule = () => debouncedRefresh('schedule',
-        refetchForTerm<ScheduleEntry>('schedule', s => setScheduleAndRef(s)));
+        refetchForTerm<ScheduleEntry>('schedule', s => applyServerSchedule(s)));
 
       // Realtime can deliver Postgres arrays either as JSON arrays or as "{a,b}" text.
       const toList = (v: any): string[] => {
@@ -286,6 +313,7 @@ const App: React.FC = () => {
         if (batch.length === 0) return;
         if (batch.length > SCHEDULE_BURST_LIMIT) { refetchSchedule(); return; }
         const termId = activeTermIdRef.current;
+        markForeignChanges(batch.map(b => b.id));
         const byId = new Map<string, ScheduleEntry>(scheduleRef.current.map(e => [e.id, e] as [string, ScheduleEntry]));
         for (const { id, row } of batch) {
           // Deleted, or now belongs to a term other than the one on screen.
@@ -316,6 +344,10 @@ const App: React.FC = () => {
       const onTableChange = (tableName: string, refreshFn: () => Promise<void>) => (payload: any) => {
         const id = payload.new?.id ?? payload.old?.id;
         if (DataService.isRecentLocalWrite(tableName, id)) return;
+        // A change in a different term doesn't concern this screen — someone
+        // uploading next term's modules shouldn't make everyone re-download theirs.
+        const rowTerm = payload.new?.termId ?? payload.old?.termId;
+        if (rowTerm && activeTermIdRef.current && rowTerm !== activeTermIdRef.current) return;
         debouncedRefresh(tableName, refreshFn);
       };
 
@@ -460,7 +492,7 @@ const App: React.FC = () => {
       if (f !== null) setFaculties(f);
       if (r !== null) setRooms(r);
       if (g !== null) setGroups(g);
-      if (s !== null) setScheduleAndRef(s);
+      if (s !== null) applyServerSchedule(s);
     } catch (err) {
       console.error('[App] refreshAllData failed:', err);
     }
@@ -559,6 +591,14 @@ const App: React.FC = () => {
 
   const maxZRef = useRef(12);
 
+  // Session ids must be unique across ALL users and terms: saving is an upsert
+  // by id, so two people producing the same id in the same millisecond would
+  // overwrite each other's session (even in another term). Random suffix added.
+  const newSessionId = (index: number) =>
+    `s-${Date.now()}-${index}-${(typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10)}`;
+
   const handleSaveSession = async (newEntries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => {
     if (!canWrite()) return;
     const termId = activeTermIdRef.current || effectiveActiveTerm?.id;
@@ -567,7 +607,7 @@ const App: React.FC = () => {
     const now = new Date().toISOString();
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
-      id: `s-${Date.now()}-${index}`,
+      id: newSessionId(index),
       // Always the term on screen — never a value carried in from a form or file.
       termId,
       departmentId: currentUser?.departmentScope === 'All' ? 'CS' : (currentUser?.departmentScope || 'General'),
@@ -594,7 +634,7 @@ const App: React.FC = () => {
     await withSync(async () => {
       const updatedSchedule = scheduleRef.current.filter(s => s.id !== id);
       setScheduleAndRef(updatedSchedule);
-      await DataService.deleteEntry(id, updatedSchedule);
+      await DataService.deleteEntry(id, updatedSchedule, activeTermIdRef.current);
     });
   };
 
@@ -645,7 +685,7 @@ const App: React.FC = () => {
     if (!canWrite()) return;
     pushHistory();
     await withSync(async () => {
-      const duplicatedEntry: ScheduleEntry = { ...entry, id: `s-${Date.now()}-dup` };
+      const duplicatedEntry: ScheduleEntry = { ...entry, id: newSessionId(0) };
       const updatedSchedule = [...scheduleRef.current, duplicatedEntry];
       setScheduleAndRef(updatedSchedule);
       await DataService.addEntries([duplicatedEntry], updatedSchedule);
@@ -659,7 +699,7 @@ const App: React.FC = () => {
     await withSync(async () => {
       const updatedSchedule = scheduleRef.current.filter(s => !ids.includes(s.id));
       setScheduleAndRef(updatedSchedule);
-      await DataService.deleteEntries(ids, updatedSchedule);
+      await DataService.deleteEntries(ids, updatedSchedule, activeTermIdRef.current);
     });
   };
 
@@ -696,61 +736,45 @@ const App: React.FC = () => {
     await handleSaveSession([{ ...entry, day: newDay, startTime: newStartTime, endTime: newEndTime }]);
   };
 
-  const handleUndo = async () => {
-    if (undoStackRef.current.length === 0) return;
+  // Undo and redo share one routine: step the timetable to `h.snap`, except for
+  // sessions someone else has changed since (h.foreign) — those keep their
+  // current, teammate-made version and are not written to the database.
+  const stepHistory = async (from: React.MutableRefObject<HistoryEntry[]>, to: React.MutableRefObject<HistoryEntry[]>, label: string) => {
+    if (from.current.length === 0) return;
     if (!canWrite()) return;
-    const target = undoStackRef.current.pop()!;
-    redoStackRef.current = [...redoStackRef.current, [...scheduleRef.current]];
+    const h = from.current.pop()!;
     const current = [...scheduleRef.current];
-    setScheduleAndRef(target);
+    to.current = [...to.current, { snap: current, foreign: new Set() }];
+    const next = [
+      ...h.snap.filter(t => !h.foreign.has(t.id)),
+      ...current.filter(c => h.foreign.has(c.id)),
+    ];
+    setScheduleAndRef(next);
     isSyncingRef.current = true;
     setIsSyncing(true);
     try {
-      const toDelete = current.filter(c => !target.some(t => t.id === c.id));
-      const toAdd = target.filter(t => !current.some(c => c.id === t.id));
-      const toUpdate = target.filter(t => {
-        const curr = current.find(c => c.id === t.id);
+      const currentById = new Map(current.map(c => [c.id, c] as [string, ScheduleEntry]));
+      const nextIds = new Set(next.map(t => t.id));
+      const toDelete = current.filter(c => !nextIds.has(c.id));
+      const toAdd = next.filter(t => !currentById.has(t.id));
+      const toUpdate = next.filter(t => {
+        const curr = currentById.get(t.id);
         return curr && JSON.stringify(curr) !== JSON.stringify(t);
       });
-      for (const e of toDelete) await DataService.deleteEntry(e.id, target);
-      if (toAdd.length > 0) await DataService.addEntries(toAdd, target);
-      for (const e of toUpdate) await DataService.updateEntry(e, target);
+      if (toDelete.length > 0) await DataService.deleteEntries(toDelete.map(e => e.id), next, activeTermIdRef.current);
+      if (toAdd.length > 0) await DataService.addEntries(toAdd, next);
+      for (const e of toUpdate) await DataService.updateEntry(e, next);
+      if (h.foreign.size > 0) console.log(`[${label}] left ${h.foreign.size} session(s) changed by others untouched`);
     } catch (err: any) {
-      console.error('[Undo Error]', err);
+      console.error(`[${label} Error]`, err);
     } finally {
       setIsSyncing(false);
       setTimeout(() => { isSyncingRef.current = false; }, 500);
       syncHistoryState();
     }
   };
-
-  const handleRedo = async () => {
-    if (redoStackRef.current.length === 0) return;
-    if (!canWrite()) return;
-    const target = redoStackRef.current.pop()!;
-    undoStackRef.current = [...undoStackRef.current, [...scheduleRef.current]];
-    const current = [...scheduleRef.current];
-    setScheduleAndRef(target);
-    isSyncingRef.current = true;
-    setIsSyncing(true);
-    try {
-      const toDelete = current.filter(c => !target.some(t => t.id === c.id));
-      const toAdd = target.filter(t => !current.some(c => c.id === t.id));
-      const toUpdate = target.filter(t => {
-        const curr = current.find(c => c.id === t.id);
-        return curr && JSON.stringify(curr) !== JSON.stringify(t);
-      });
-      for (const e of toDelete) await DataService.deleteEntry(e.id, target);
-      if (toAdd.length > 0) await DataService.addEntries(toAdd, target);
-      for (const e of toUpdate) await DataService.updateEntry(e, target);
-    } catch (err: any) {
-      console.error('[Redo Error]', err);
-    } finally {
-      setIsSyncing(false);
-      setTimeout(() => { isSyncingRef.current = false; }, 500);
-      syncHistoryState();
-    }
-  };
+  const handleUndo = () => stepHistory(undoStackRef, redoStackRef, 'Undo');
+  const handleRedo = () => stepHistory(redoStackRef, undoStackRef, 'Redo');
 
   // Keyboard listener for Ctrl+Z / Ctrl+Y — uses refs to avoid stale closure
   const handleUndoRef = useRef(handleUndo);
@@ -802,12 +826,12 @@ const App: React.FC = () => {
       const deletedIds = courses.filter(old => !updatedCourses.some(n => n.id === old.id)).map(c => c.id);
       if (deletedIds.length > 0) {
         // Cascade: remove schedule entries for deleted courses before deleting courses (FK constraint)
-        const remaining = await DataService.deleteScheduleCascade('courseId', deletedIds, scheduleRef.current);
+        const remaining = await DataService.deleteScheduleCascade('courseId', deletedIds, scheduleRef.current, effectiveActiveTerm?.id);
         setScheduleAndRef(remaining);
       }
       setCourses(updatedCourses);
       await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id, onProgress);
-      await DataService.deleteRecords('courses', deletedIds);
+      await DataService.deleteRecords('courses', deletedIds, effectiveActiveTerm?.id);
     });
   };
 
@@ -817,12 +841,12 @@ const App: React.FC = () => {
       const deletedIds = faculties.filter(old => !updatedFaculties.some(n => n.id === old.id)).map(f => f.id);
       if (deletedIds.length > 0) {
         // Cascade: remove schedule entries for deleted faculties before deleting faculties (FK constraint)
-        const remaining = await DataService.deleteScheduleCascade('facultyId', deletedIds, scheduleRef.current);
+        const remaining = await DataService.deleteScheduleCascade('facultyId', deletedIds, scheduleRef.current, effectiveActiveTerm?.id);
         setScheduleAndRef(remaining);
       }
       setFaculties(updatedFaculties);
       await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id, onProgress);
-      await DataService.deleteRecords('faculties', deletedIds);
+      await DataService.deleteRecords('faculties', deletedIds, effectiveActiveTerm?.id);
     });
   };
 
@@ -832,12 +856,12 @@ const App: React.FC = () => {
       const deletedIds = rooms.filter(old => !updatedRooms.some(n => n.id === old.id)).map(r => r.id);
       if (deletedIds.length > 0) {
         // Cascade: remove schedule entries for deleted rooms (FK constraint)
-        const remaining = await DataService.deleteScheduleCascade('roomId', deletedIds, scheduleRef.current);
+        const remaining = await DataService.deleteScheduleCascade('roomId', deletedIds, scheduleRef.current, effectiveActiveTerm?.id);
         setScheduleAndRef(remaining);
       }
       setRooms(updatedRooms);
       await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id, onProgress);
-      await DataService.deleteRecords('rooms', deletedIds);
+      await DataService.deleteRecords('rooms', deletedIds, effectiveActiveTerm?.id);
     });
   };
 
@@ -847,7 +871,7 @@ const App: React.FC = () => {
       const deletedIds = groups.filter(old => !updatedGroups.some(n => n.id === old.id)).map(g => g.id);
       setGroups(updatedGroups);
       await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id, onProgress);
-      await DataService.deleteRecords('groups', deletedIds);
+      await DataService.deleteRecords('groups', deletedIds, effectiveActiveTerm?.id);
     });
   };
 

@@ -13,6 +13,7 @@ import {
   type SchedulerResult,
   parseClockHour,
 } from '../utils/autoScheduler';
+import { areParallelElectives } from '../utils/electives';
 
 interface Props {
   courses: Course[];
@@ -273,8 +274,40 @@ const AutoSchedulePanel: React.FC<Props> = ({
     });
   }, []);
 
+  // A result belongs to the term it was generated in. If the person switches
+  // term before applying, the result is dropped — applying it would put one
+  // term's timetable (built from that term's courses/rooms) into another term.
+  const [resultTermId, setResultTermId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (result && resultTermId !== activeTermId) {
+      setResult(null); setStage('idle'); setProgress(0); setLabel(''); setIsApplied(false);
+    }
+  }, [activeTermId]);
+
+  // Sessions in the generated result that now clash with the live timetable —
+  // e.g. someone applied another school's sheet after this one was generated.
+  const countClashesWithLive = (entries: ScheduleEntry[]): number => {
+    const mins = (t: string) => { const [h, m] = String(t).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+    const live = schedule.filter(s => s.termId === activeTermId);
+    let n = 0;
+    for (const a of entries) {
+      const aS = mins(a.startTime), aE = mins(a.endTime);
+      const hit = live.some(b => {
+        if (b.day !== a.day || !(aS < mins(b.endTime) && mins(b.startTime) < aE)) return false;
+        if (!(a.weeks || []).some(w => (b.weeks || []).includes(w))) return false;
+        if (a.facultyId && a.facultyId === b.facultyId) return true;
+        if (a.roomId && a.roomId === b.roomId) return true;
+        return !areParallelElectives(a.category, b.category) &&
+          (a.groupIds || []).some(g => (b.groupIds || []).includes(g));
+      });
+      if (hit) n++;
+    }
+    return n;
+  };
+
   const handleGenerate = async () => {
     if (!assignments.length) return;
+    setResultTermId(activeTermId);
     setStage('running'); setProgress(0); setLabel('Starting…'); setResult(null);
     const balanced = applyDefaultDays(assignments, defDays);
     const res = await runAutoScheduler(
@@ -288,6 +321,17 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
   const handleApply = async () => {
     if (!result || isApplied) return;
+    if (resultTermId !== activeTermId) {
+      alert('This result was generated in a different term. Please click Generate again in this term.');
+      return;
+    }
+    const clashes = countClashesWithLive(result.entries);
+    if (clashes > 0 && !confirm(
+      `${clashes} of the ${result.entries.length} generated sessions now clash with the live timetable ` +
+      `(same faculty, room or cohort at the same time). Someone probably added sessions — for example ` +
+      `another school's timetable — after you clicked Generate.\n\n` +
+      `Recommended: Cancel, then click Generate again so it works around them.\n\nApply anyway?`
+    )) return;
     setApplying(true);
     await onApplySchedule(result.entries.map(({ id: _id, departmentId: _d, ...rest }) => rest) as any);
     setApplying(false);

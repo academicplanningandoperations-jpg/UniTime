@@ -547,7 +547,12 @@ export async function runAutoScheduler(
   for (const entry of existingSchedule) {
     if (entry.termId !== termId) continue;
     const keys = slotKeys(entry.day, entry.startTime, entry.endTime);
-    if (entry.facultyId) markBusy(facultyOcc, entry.facultyId, keys);
+    if (entry.facultyId) {
+      markBusy(facultyOcc, entry.facultyId, keys);
+      // Also count existing theory sessions (e.g. another school's timetable) for
+      // the "no more than 2 hours in a row" rule, not just this run's sessions.
+      if (baseCategory(entry.category) !== 'lab') markBusy(facultyNonLabOcc, entry.facultyId, keys);
+    }
     const existingElective = parseElective(entry.category);
     entry.groupIds?.forEach(gid => {
       keys.forEach(sk => {

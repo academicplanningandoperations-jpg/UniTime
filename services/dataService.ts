@@ -355,10 +355,14 @@ export class DataService {
     console.log(`[DB] ${tableName}: explicitly deleted record ${id}`);
   }
 
-  static async deleteRecords(tableName: string, ids: string[]): Promise<void> {
+  // termId (when given) is a safety net: the delete can only ever hit rows of
+  // that term, even if an id were somehow shared with another term.
+  static async deleteRecords(tableName: string, ids: string[], termId?: string): Promise<void> {
     if (!supabase || ids.length === 0) return;
     this.markLocalWrite(tableName, ids);
-    const { error } = await supabase.from(tableName).delete().in('id', ids);
+    let q = supabase.from(tableName).delete().in('id', ids);
+    if (termId && TERM_SCOPED.has(tableName)) q = q.eq('termId', termId);
+    const { error } = await q;
     if (error) {
       console.error(`[DB] deleteRecords error for ${tableName}:`, error.message);
       throw new Error(error.message);
@@ -372,11 +376,14 @@ export class DataService {
     field: 'facultyId' | 'courseId' | 'roomId',
     ids: string[],
     allEntries: ScheduleEntry[],
+    termId?: string,
   ): Promise<ScheduleEntry[]> {
     if (!supabase || ids.length === 0) return allEntries;
     const remaining = allEntries.filter(e => !ids.includes((e as any)[field] ?? ''));
     this.markLocalWrite('schedule', allEntries.filter(e => ids.includes((e as any)[field] ?? '')).map(e => e.id));
-    const { error } = await supabase.from('schedule').delete().in(field, ids);
+    let q = supabase.from('schedule').delete().in(field, ids);
+    if (termId) q = q.eq('termId', termId);
+    const { error } = await q;
     if (error) console.warn(`[DB] schedule cascade-delete (${field}) warning:`, error.message);
     else console.log(`[DB] schedule: cascade-deleted entries for ${field} [${ids.join(',')}]`);
     this.persistScheduleSnapshot(remaining);
@@ -403,11 +410,13 @@ export class DataService {
     }
   }
 
-  static async deleteEntries(ids: string[], allEntries: ScheduleEntry[]): Promise<void> {
+  static async deleteEntries(ids: string[], allEntries: ScheduleEntry[], termId?: string): Promise<void> {
     this.persistScheduleSnapshot(allEntries);
     if (!supabase || ids.length === 0) return;
     this.markLocalWrite('schedule', ids);
-    const { error } = await supabase.from('schedule').delete().in('id', ids);
+    let q = supabase.from('schedule').delete().in('id', ids);
+    if (termId) q = q.eq('termId', termId);
+    const { error } = await q;
     if (error) console.error('[DB] deleteEntries error:', error.message);
     else console.log(`[DB] schedule: bulk-deleted ${ids.length} entries`);
   }
@@ -422,11 +431,13 @@ export class DataService {
     else console.log(`[DB] schedule: updated entry ${entry.id}`);
   }
 
-  static async deleteEntry(id: string, allEntries: ScheduleEntry[]): Promise<void> {
+  static async deleteEntry(id: string, allEntries: ScheduleEntry[], termId?: string): Promise<void> {
     this.persistScheduleSnapshot(allEntries);
     if (!supabase) return;
     this.markLocalWrite('schedule', [id]);
-    const { error } = await supabase.from('schedule').delete().eq('id', id);
+    let q = supabase.from('schedule').delete().eq('id', id);
+    if (termId) q = q.eq('termId', termId);
+    const { error } = await q;
     if (error) console.error('[DB] deleteEntry error:', error.message);
     else console.log(`[DB] schedule: deleted entry ${id}`);
   }

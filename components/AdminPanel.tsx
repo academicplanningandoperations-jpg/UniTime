@@ -20,6 +20,7 @@ import {
   EyeOff
 } from 'lucide-react';
 import { AuthService } from '../services/authService';
+import UsagePanel from './UsagePanel';
 
 interface AdminPanelProps {
   users: UserAccount[];
@@ -249,6 +250,9 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
       <div className="px-2 grid grid-cols-1 gap-4 flex-1 overflow-y-auto mb-10 pb-20 custom-scrollbar">
         {/* Main Column: Personnel & Migration */}
         <div className="flex flex-col gap-4">
+
+          {/* Database & usage — System Administrator (admin) login only */}
+          {currentUser.username.toLowerCase() === 'admin' && <UsagePanel />}
 
           {/* Personnel Directory Panel */}
           <div className="bg-white border border-[#e2e8f0] shadow-sm overflow-hidden">

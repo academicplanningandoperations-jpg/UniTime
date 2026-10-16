@@ -31,6 +31,7 @@ import * as XLSX from 'xlsx';
 import { DataService } from './services/dataService';
 import { supabase } from './services/supabase';
 import { AuthService } from './services/authService';
+import { UsageMeter, startUsageReporting } from './services/usageMeter';
 
 const App: React.FC = () => {
   // Who is signed in comes from the Supabase Auth session (checked by the
@@ -207,6 +208,16 @@ const App: React.FC = () => {
   // in: the database only answers signed-in team members. They restart for a
   // different person (sign out / sign in) and stop on sign-out.
   const signedInId = currentUser?.id;
+
+  // Report this browser's estimated Supabase egress every few minutes (shown
+  // to the System Administrator in the Admin panel).
+  useEffect(() => {
+    if (!signedInId || !supabase) return;
+    return startUsageReporting(async (bytes, requests, realtime) => {
+      const { error } = await supabase!.rpc('add_usage', { p_bytes: bytes, p_requests: requests, p_realtime: realtime });
+      return !error;
+    });
+  }, [signedInId]);
   useEffect(() => {
     if (!signedInId) return;
     // Always clear stale user cache on startup — Supabase is the single source of truth for users.
@@ -332,6 +343,7 @@ const App: React.FC = () => {
       };
 
       const onScheduleChange = (payload: any) => {
+        UsageMeter.recordRealtime(payload);
         const isDelete = payload.eventType === 'DELETE';
         const rec = isDelete ? payload.old : payload.new;
         const id: string | undefined = rec?.id;
@@ -350,6 +362,7 @@ const App: React.FC = () => {
       // (uploads, admin edits), so a debounced refetch of that one table is fine.
       // Echoes of this tab's own writes don't trigger a refetch.
       const onTableChange = (tableName: string, refreshFn: () => Promise<void>) => (payload: any) => {
+        UsageMeter.recordRealtime(payload);
         const id = payload.new?.id ?? payload.old?.id;
         if (DataService.isRecentLocalWrite(tableName, id)) return;
         // A change in a different term doesn't concern this screen — someone

@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Lock, User, ShieldCheck } from 'lucide-react';
-import { UserAccount, Role } from '../types';
+import { UserAccount } from '../types';
 import Logo from './Logo';
-import { supabase } from '../services/supabase';
+import { AuthService } from '../services/authService';
 
 interface LoginProps {
   onLogin: (user: UserAccount) => void;
-  users: UserAccount[];
   isInitializing?: boolean;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, isInitializing }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -44,43 +43,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
     setChecking(true);
 
     try {
-      // Hardcoded superadmin shortcut
-      if (username.toLowerCase() === 'admin' && password === 'admin123') {
-        onLogin({
-          id: 'u-admin', username: 'admin', password: 'admin123',
-          name: 'System Administrator', role: Role.SUPER_ADMIN,
-          departmentScope: 'All', lastLogin: new Date().toISOString()
-        });
-        return;
-      }
-
-      // Step 1: check users already loaded in state (fast path)
-      const local = users.find(
-        u => u.username.toLowerCase() === username.toLowerCase() &&
-             (u.password === password || password === 'admin123')
-      );
-      if (local) { onLogin(local); return; }
-
-      // Step 2: if not found locally (state not loaded yet), query Supabase directly
-      // This ensures login works even on fresh devices where localStorage is empty
-      // and loadData hasn't finished yet — each user's session is fully independent.
-      if (supabase) {
-        const { data, error: qErr } = await supabase
-          .from('users')
-          .select('*')
-          .ilike('username', username)
-          .limit(1)
-          .single();
-
-        if (!qErr && data) {
-          if (data.password === password || password === 'admin123') {
-            onLogin(data as UserAccount);
-            return;
-          }
-        }
-      }
-
-      setError('Invalid username or password.');
+      // The password is checked by Supabase Auth on the server — never in the
+      // browser, and there is no built-in or master password.
+      const { user, error: loginError } = await AuthService.signIn(username, password);
+      if (user) { onLogin(user); return; }
+      setError(loginError || 'Invalid username or password.');
     } finally {
       setChecking(false);
     }

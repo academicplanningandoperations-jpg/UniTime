@@ -15,12 +15,16 @@ import {
   CloudLightning,
   Calendar,
   AlertTriangle,
-  RefreshCcw
+  RefreshCcw,
+  Eye,
+  EyeOff
 } from 'lucide-react';
+import { AuthService } from '../services/authService';
 
 interface AdminPanelProps {
   users: UserAccount[];
-  onUpdateUsers: (users: UserAccount[]) => void;
+  onSaveUser: (user: Partial<UserAccount> & { username: string; name: string }, password?: string) => Promise<void>;
+  onDeleteUser: (id: string) => Promise<void>;
   currentUser: UserAccount;
   schedule: ScheduleEntry[];
   courses: Course[];
@@ -32,7 +36,7 @@ interface AdminPanelProps {
   onClearSchedule: () => Promise<void>;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users, onSaveUser, onDeleteUser, currentUser, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -52,24 +56,44 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUs
 
   const [formData, setFormData] = useState<Partial<UserAccount>>(initialUserState);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Saving goes through the secure admin-users function (Super Admins only).
+  // A new user needs a password; when editing, a blank password keeps the old one.
+  const [isSaving, setIsSaving] = useState(false);
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.username && formData.name) {
-      if (isEditing && editingUserId) {
-        const updatedUsers = users.map(u => u.id === editingUserId ? { ...u, ...formData as UserAccount } : u);
-        onUpdateUsers(updatedUsers);
-      } else {
-        const user: UserAccount = {
-          id: `u-${Date.now()}`,
-          username: formData.username,
-          password: formData.password || 'password123',
-          name: formData.name,
-          role: formData.role || Role.SCHEDULER,
-          departmentScope: formData.departmentScope || 'All',
-        };
-        onUpdateUsers([...users, user]);
-      }
+    if (!formData.username || !formData.name) return;
+    const password = (formData.password || '').trim();
+    if (!isEditing && password.length < 6) { alert('Please set a password of at least 6 characters.'); return; }
+    if (isEditing && password && password.length < 6) { alert('The new password must be at least 6 characters.'); return; }
+    setIsSaving(true);
+    try {
+      await onSaveUser({
+        ...(isEditing && editingUserId ? { id: editingUserId } : {}),
+        username: formData.username.trim(),
+        name: formData.name.trim(),
+        role: formData.role || Role.SCHEDULER,
+        departmentScope: formData.departmentScope || 'All',
+      }, password || undefined);
+      setRevealed(prev => { const n = { ...prev }; if (editingUserId) delete n[editingUserId]; return n; });
       closeModal();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Super Admins can look up a team member's password. The database only
+  // returns it to a signed-in Super Admin.
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
+  const togglePassword = async (id: string) => {
+    if (revealed[id] !== undefined) {
+      setRevealed(prev => { const n = { ...prev }; delete n[id]; return n; });
+      return;
+    }
+    try {
+      const pw = await AuthService.getPassword(id);
+      setRevealed(prev => ({ ...prev, [id]: pw ?? '(not stored — set a new one with Edit)' }));
+    } catch (err: any) {
+      alert(`Couldn't read the password: ${err.message || err}`);
     }
   };
 
@@ -85,7 +109,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUs
   const openEditModal = (user: UserAccount) => {
     setFormData({
       username: user.username,
-      password: user.password,
+      password: '',
       name: user.name,
       role: user.role,
       departmentScope: user.departmentScope
@@ -101,7 +125,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUs
       return;
     }
     if (confirm('Are you sure you want to remove this team member?')) {
-      onUpdateUsers(users.filter(u => u.id !== id));
+      onDeleteUser(id);
     }
   };
 
@@ -275,12 +299,18 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
                     <div className="flex-1 min-w-0">
                       <p className="text-[12px] font-black text-[#0f172a] truncate">{user.name}</p>
                       <p className="text-[9px] text-[#94a3b8] font-bold">@{user.username} · {user.departmentScope}</p>
+                      {revealed[user.id] !== undefined && (
+                        <p className="text-[10px] font-mono font-bold text-[#7c2d12] bg-[#fff7ed] border border-[#fdba74] inline-block px-1.5 mt-0.5 select-all">{revealed[user.id]}</p>
+                      )}
                     </div>
                     <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 border mx-4 shrink-0"
                       style={{ color: badge.color, background: badge.bg, borderColor: badge.border }}>
                       {user.role}
                     </span>
                     <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => togglePassword(user.id)} className="p-1.5 bg-[#f8fafc] border border-[#e2e8f0] text-[#64748b] hover:bg-[#fff7ed] hover:border-[#ea580c] hover:text-[#ea580c] transition-colors" title={revealed[user.id] !== undefined ? 'Hide password' : 'Show password'}>
+                        {revealed[user.id] !== undefined ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
                       <button onClick={() => openEditModal(user)} className="p-1.5 bg-[#f8fafc] border border-[#e2e8f0] text-[#64748b] hover:bg-[#eff6ff] hover:border-[#185baf] hover:text-[#185baf] transition-colors" title="Edit">
                         <Edit2 className="w-3 h-3" />
                       </button>
@@ -429,8 +459,8 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
                     <input type="text" placeholder="swilson" className="w-full border border-[#ccc] px-2 py-1 pb-[3px] text-[11px] font-bold outline-none focus:border-[#185baf] uppercase disabled:bg-[#f0f0f0]" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} disabled={isEditing} required />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-[#666] uppercase tracking-wide">Secret Token</label>
-                    <input type="password" placeholder="••••••••" className="w-full border border-[#ccc] px-2 py-1 pb-[3px] text-[11px] font-bold outline-none focus:border-[#185baf]" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} required={!isEditing} />
+                    <label className="text-[10px] font-bold text-[#666] uppercase tracking-wide">{isEditing ? 'New Password (blank = keep)' : 'Password'}</label>
+                    <input type="text" autoComplete="new-password" placeholder={isEditing ? 'leave blank to keep' : 'min. 6 characters'} className="w-full border border-[#ccc] px-2 py-1 pb-[3px] text-[11px] font-bold outline-none focus:border-[#185baf]" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} required={!isEditing} />
                   </div>
                 </div>
                 
@@ -453,8 +483,8 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
               
               <div className="pt-4 flex justify-end gap-2 px-1">
                 <button type="button" onClick={closeModal} className="btn-secondary min-w-[80px]">Cancel</button>
-                <button type="submit" className="btn-primary min-w-[80px]">
-                  {isEditing ? 'Save Modify' : '+ Generate'}
+                <button type="submit" disabled={isSaving} className="btn-primary min-w-[80px] disabled:opacity-50">
+                  {isSaving ? 'Saving…' : isEditing ? 'Save Modify' : '+ Generate'}
                 </button>
               </div>
             </form>

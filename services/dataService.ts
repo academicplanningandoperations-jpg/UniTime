@@ -5,7 +5,7 @@ import { areParallelElectives } from '../utils/electives';
 // ─── Schema whitelist ─────────────────────────────────────────────────────────
 // Only these columns are sent to Supabase. Any extra React-only fields are stripped.
 const SCHEMA: Record<string, string[]> = {
-  users:     ['id', 'username', 'password', 'name', 'role', 'departmentScope', 'lastLogin'],
+  users:     ['id', 'username', 'name', 'role', 'departmentScope', 'lastLogin'], // never 'password'
   terms:     ['id', 'name', 'startDate', 'endDate', 'academicYear', 'isActive'],
   courses:   ['id', 'termId', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
   faculties: ['id', 'facultyId', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],

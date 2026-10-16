@@ -30,21 +30,24 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { DataService } from './services/dataService';
 import { supabase } from './services/supabase';
-
-const MOCK_USERS: UserAccount[] = [
-  { id: 'u1', username: 'superadmin', password: 'admin123', name: 'Main Administrator', role: Role.SUPER_ADMIN, departmentScope: 'All', lastLogin: new Date().toISOString() }
-];
+import { AuthService } from './services/authService';
 
 const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
-    const saved = localStorage.getItem('unitime_session');
-    try {
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) {
-      console.error('Failed to parse session:', e);
-      return null;
-    }
-  });
+  // Who is signed in comes from the Supabase Auth session (checked by the
+  // server), not from a value saved in the browser that could be edited.
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  useEffect(() => {
+    try { localStorage.removeItem('unitime_session'); } catch { /* old, unsafe session copy */ }
+    let cancelled = false;
+    AuthService.restore()
+      .then(u => { if (!cancelled && u) setCurrentUser(u); })
+      .finally(() => { if (!cancelled) setAuthChecked(true); });
+    const sub = supabase?.auth.onAuthStateChange(event => {
+      if (event === 'SIGNED_OUT') setCurrentUser(null);
+    });
+    return () => { cancelled = true; sub?.data.subscription.unsubscribe(); };
+  }, []);
   const [activeTab, setActiveTab] = useState('dashboard');
   // Windows open with nothing selected — the user picks what to view.
   const [panels, setPanels] = useState<any[]>([
@@ -123,7 +126,7 @@ const App: React.FC = () => {
   // when Supabase is temporarily unavailable — avoids username constraint conflicts.
   // Users are NOT cached in localStorage — Supabase is the single source of truth.
   // Caching caused ghost users to appear after Supabase deletes, breaking login.
-  const [users, setUsers] = useState<UserAccount[]>(MOCK_USERS);
+  const [users, setUsers] = useState<UserAccount[]>([]);
   // Initialise terms from the last real list cached from Supabase. There is
   // deliberately NO made-up fallback term any more: a placeholder term once made
   // edits get saved under a term that didn't exist ('t1'). If no real term is
@@ -200,7 +203,12 @@ const App: React.FC = () => {
     return true;
   };
 
+  // Data loads and the live-update connection start only once someone is signed
+  // in: the database only answers signed-in team members. They restart for a
+  // different person (sign out / sign in) and stop on sign-out.
+  const signedInId = currentUser?.id;
   useEffect(() => {
+    if (!signedInId) return;
     // Always clear stale user cache on startup — Supabase is the single source of truth for users.
     localStorage.removeItem('unitime_users');
 
@@ -212,7 +220,7 @@ const App: React.FC = () => {
         // causing all term-scoped data to load empty because the mock term id ('t1')
         // never matched the real data stored in Supabase / localStorage.
         const [u, t] = await Promise.all([
-          DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
+          DataService.loadEntity<UserAccount>('users', 'unitime_users', []),
           DataService.loadEntity<Term>('terms', 'unitime_terms', []),
         ]);
         setUsers(u);
@@ -394,7 +402,7 @@ const App: React.FC = () => {
         supabase.removeChannel(channel);
       };
     }
-  }, []);
+  }, [signedInId]);
 
   // Keep activeTermIdRef current AND reload all term-scoped data when the active term changes.
   useEffect(() => {
@@ -519,7 +527,7 @@ const App: React.FC = () => {
   //  • A slow 15-minute safety net while the tab is on screen, in case a single
   //    realtime message was ever missed. Hidden tabs skip it entirely.
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !signedInId) return;
     const AWAY_REFRESH_MS = 3 * 60 * 1000;
     const SAFETY_NET_MS = 15 * 60 * 1000;
     let hiddenSince: number | null = document.visibilityState === 'hidden' ? Date.now() : null;
@@ -542,7 +550,7 @@ const App: React.FC = () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       if (fullRefreshRetryRef.current) clearTimeout(fullRefreshRetryRef.current);
     };
-  }, []);
+  }, [signedInId]);
 
   // Helper: wraps any write operation so isSyncingRef blocks realtime re-fetches
   // for the full debounce window (2s) + a safety buffer (1s extra = 3s total).
@@ -560,14 +568,6 @@ const App: React.FC = () => {
       isSyncingRef.current = false;
     }
   };
-
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('unitime_session', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('unitime_session');
-    }
-  }, [currentUser]);
 
   // Clash detection waits a moment for a burst of changes to settle (dragging,
   // pasting, a batch of realtime updates from colleagues) and then runs once,
@@ -800,12 +800,23 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const handleUpdateUsers = async (updatedUsers: UserAccount[]) => {
-    const deletedIds = users.filter(old => !updatedUsers.some(newIt => newIt.id === old.id)).map(c => c.id);
+  // Team members are managed only through the admin-users function on Supabase,
+  // which re-checks that the caller is a Super Admin and keeps the login and the
+  // profile in step. The browser never writes the users table directly.
+  const reloadUsers = async () => {
+    const u = await DataService.fetchTable<UserAccount>('users');
+    if (u !== null) setUsers(u);
+  };
+  const handleSaveUser = async (user: Partial<UserAccount> & { username: string; name: string }, password?: string) => {
     await withSync(async () => {
-      setUsers(updatedUsers);
-      await DataService.saveEntity('users', 'unitime_users', updatedUsers);
-      for (const id of deletedIds) await DataService.deleteRecord('users', id);
+      await AuthService.saveUser(user, password);
+      await reloadUsers();
+    });
+  };
+  const handleDeleteUser = async (id: string) => {
+    await withSync(async () => {
+      await AuthService.deleteUser(id);
+      await reloadUsers();
     });
   };
 
@@ -1247,7 +1258,7 @@ const App: React.FC = () => {
     }
   }, [activeTab, currentUser]);
 
-  if (!currentUser) return <Login onLogin={(user) => { setCurrentUser(user); resetUIState(); }} users={users} />;
+  if (!currentUser) return <Login onLogin={(user) => { setCurrentUser(user); resetUIState(); }} isInitializing={!authChecked} />;
   
   if (!isSupabaseConfigured) {
     return <SupabaseSetup onConfigured={() => {
@@ -1262,7 +1273,7 @@ const App: React.FC = () => {
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         currentUser={currentUser}
-        onLogout={() => { setCurrentUser(null); resetUIState(); }}
+        onLogout={() => { AuthService.signOut(); setCurrentUser(null); resetUIState(); }}
         isSupabaseConnected={isSupabaseConfigured}
         activeTermName={effectiveActiveTerm?.name}
         terms={terms}
@@ -1352,7 +1363,7 @@ const App: React.FC = () => {
               <AutoSchedulePanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} activeTermId={effectiveActiveTerm?.id} onApplySchedule={handleSaveSession} currentUser={currentUser} schedule={schedule} />
             </div>
           )}
-          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
+          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
           {activeTab === 'backlog' && (currentUser.role !== Role.VIEWER) && <BacklogPanel />}
         </div>
       </main>

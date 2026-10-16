@@ -325,6 +325,16 @@ const AutoSchedulePanel: React.FC<Props> = ({
       alert('This result was generated in a different term. Please click Generate again in this term.');
       return;
     }
+    // Bulk import: make sure it is going into the intended term.
+    const existing = schedule.filter(s => s.termId === activeTermId).length;
+    if (!confirm(
+      `Add ${result.entries.length} generated sessions to this term?\n\n` +
+      `TERM:  ${activeTerm?.name || activeTermId}\n\n` +
+      (existing > 0
+        ? `This term already has ${existing} session(s); the new ones are added alongside them.\n\n`
+        : `This term has no sessions yet.\n\n`) +
+      `If this is the wrong term, click Cancel and choose the right one in the Term box at the top.`
+    )) return;
     const clashes = countClashesWithLive(result.entries);
     if (clashes > 0 && !confirm(
       `${clashes} of the ${result.entries.length} generated sessions now clash with the live timetable ` +

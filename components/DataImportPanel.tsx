@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2, AlertTriangle, RotateCcw, Shield, Search, X, Pencil, ArrowRightLeft, Copy, Lock } from 'lucide-react';
 import { Course, Faculty, Room, StudentGroup, ScheduleEntry, Term } from '../types';
@@ -112,6 +112,10 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     unmatched: { modules: string[]; faculties: string[]; rooms: string[]; cohorts: string[] };
   } | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+  // A backup preview is matched against THIS term's modules/faculty/rooms when
+  // the file is chosen; switching term must discard it, or restoring would put
+  // sessions linked to one term's records into another term.
+  useEffect(() => { setRestorePreview(null); }, [activeTermId]);
 
   // ── Edit one record ──────────────────────────────────────────────────────────
   const [editing, setEditing] = useState<{ table: RegistryTable; original: any; draft: any } | null>(null);
@@ -660,6 +664,16 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
 
   const handleConfirmRestore = async () => {
     if (!restorePreview) return;
+    // Bulk import: make sure it is going into the intended term.
+    const existing = schedule.filter(s => s.termId === activeTermId).length;
+    if (!confirm(
+      `Restore ${restorePreview.events.length} sessions into this term?\n\n` +
+      `TERM:  ${activeTermName || activeTermId}\n\n` +
+      (existing > 0
+        ? `This term already has ${existing} session(s); the backup is added on top of them.\n\n`
+        : `This term has no sessions yet.\n\n`) +
+      `If this is the wrong term, click Cancel and choose the right one in the Term box at the top.`
+    )) return;
     setIsRestoring(true);
     try {
       await onRestoreSchedule(restorePreview.events);

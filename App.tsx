@@ -33,6 +33,7 @@ import { supabase } from './services/supabase';
 import { AuthService } from './services/authService';
 import { UsageMeter, startUsageReporting } from './services/usageMeter';
 import TermSwitchLoader from './components/TermSwitchLoader';
+import { withoutAudit } from './utils/lastChange';
 
 const App: React.FC = () => {
   // Who is signed in comes from the Supabase Auth session (checked by the
@@ -103,7 +104,7 @@ const App: React.FC = () => {
       for (const e of next) {
         nextIds.add(e.id);
         const p = prevById.get(e.id);
-        if (!p || JSON.stringify(p) !== JSON.stringify(e)) changed.push(e.id);
+        if (!p || JSON.stringify(withoutAudit(p)) !== JSON.stringify(withoutAudit(e))) changed.push(e.id);
       }
       prevById.forEach((_, id) => { if (!nextIds.has(id)) changed.push(id); });
       markForeignChanges(changed);
@@ -783,7 +784,7 @@ const App: React.FC = () => {
       const toAdd = next.filter(t => !currentById.has(t.id));
       const toUpdate = next.filter(t => {
         const curr = currentById.get(t.id);
-        return curr && JSON.stringify(curr) !== JSON.stringify(t);
+        return curr && JSON.stringify(withoutAudit(curr)) !== JSON.stringify(withoutAudit(t));
       });
       if (toDelete.length > 0) await DataService.deleteEntries(toDelete.map(e => e.id), next, activeTermIdRef.current);
       if (toAdd.length > 0) await DataService.addEntries(toAdd, next);

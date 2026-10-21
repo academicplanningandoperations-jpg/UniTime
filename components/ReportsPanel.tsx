@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { FileText, Download, Table, AlertTriangle, Calendar, Users, Briefcase, List, Trash2, Search, ChevronUp, ChevronDown, User, MapPin, BookOpen, Clock, ShieldAlert } from 'lucide-react';
 import { ScheduleEntry, Course, Faculty, Room, StudentGroup, Term, Clash, UserAccount, Role } from '../types';
 import { DataService } from '../services/dataService';
+import { lastChange, formatChangeTime } from '../utils/lastChange';
 
 interface ReportsPanelProps {
   schedule: ScheduleEntry[];
@@ -759,8 +760,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Cohorts</th>
                         <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Weeks</th>
                         <ThBtn field="category" label="Type" />
-                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Created By</th>
-                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Last Edited By</th>
+                        <th className="px-3 py-2 text-[11px] font-bold text-[#333] uppercase tracking-wide">Last Change</th>
                         {isAdmin && onDeleteEntry && (
                           <th className="px-3 py-2 text-[11px] font-bold text-[#ac2925] uppercase tracking-wide text-right">Delete</th>
                         )}
@@ -837,24 +837,15 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                             </span>
                           </td>
                           <td className="px-3 py-2 text-[10px] text-[#555] whitespace-nowrap">
-                            {entry.createdBy ? (
-                              <div>
-                                <div className="font-bold">{entry.createdBy}</div>
-                                {entry.createdAt && (
-                                  <div className="text-[#999]">{new Date(entry.createdAt).toLocaleDateString()}</div>
-                                )}
-                              </div>
-                            ) : <span className="text-[#ccc]">—</span>}
-                          </td>
-                          <td className="px-3 py-2 text-[10px] text-[#555] whitespace-nowrap">
-                            {entry.updatedBy ? (
-                              <div>
-                                <div className="font-bold">{entry.updatedBy}</div>
-                                {entry.updatedAt && (
-                                  <div className="text-[#999]">{new Date(entry.updatedAt).toLocaleDateString()}</div>
-                                )}
-                              </div>
-                            ) : <span className="text-[#ccc]">—</span>}
+                            {(() => {
+                              const lc = lastChange(entry);
+                              return lc ? (
+                                <div>
+                                  <div><span className="text-[#999]">{lc.verb} by</span> <span className="font-bold">{lc.by}</span></div>
+                                  {lc.at && <div className="text-[#999]">{formatChangeTime(lc.at)}</div>}
+                                </div>
+                              ) : <span className="text-[#ccc]">—</span>;
+                            })()}
                           </td>
                           {isAdmin && onDeleteEntry && (
                             <td className="px-3 py-2 text-right">

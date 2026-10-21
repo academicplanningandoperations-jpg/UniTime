@@ -6,6 +6,7 @@ import {
   X, Calendar, Clock, MapPin, User, Users, BookOpen, Trash2, Edit2, Save, RotateCcw, Zap
 } from 'lucide-react';
 import { DAYS, TIME_SLOTS } from '../constants';
+import { lastChange, formatChangeTime } from '../utils/lastChange';
 
 interface SessionDetailModalProps {
   isOpen: boolean;
@@ -273,25 +274,24 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
                         )}
                       </td>
                     </tr>
-                    {(activeEntry.createdBy || activeEntry.updatedBy) && (
-                      <tr className="border-t border-[#eee]">
-                        <td colSpan={2} className="pt-2">
-                          <div className="text-[9px] font-bold text-[#999] uppercase tracking-widest mb-1">Change Log</div>
-                          {activeEntry.createdBy && (
-                            <div className="text-[10px] text-[#555]">
-                              <span className="font-bold">Created by:</span> {activeEntry.createdBy}
-                              {activeEntry.createdAt && <span className="text-[#999] ml-1">· {new Date(activeEntry.createdAt).toLocaleString()}</span>}
+                    {(() => {
+                      const lc = lastChange(activeEntry);
+                      return (
+                        <tr className="border-t border-[#eee]">
+                          <td colSpan={2} className="pt-2">
+                            <div className="flex items-center gap-1.5 text-[10px] text-[#555] bg-[#f8fafc] border border-[#e2e8f0] px-2 py-1">
+                              <Clock className="w-3 h-3 text-[#94a3b8] shrink-0" />
+                              {lc ? (
+                                <span>
+                                  {lc.verb} by <span className="font-bold text-[#0f172a]">{lc.by}</span>
+                                  {lc.at && <span className="text-[#64748b]"> · {formatChangeTime(lc.at)}</span>}
+                                </span>
+                              ) : <span className="text-[#94a3b8]">No change history recorded for this session</span>}
                             </div>
-                          )}
-                          {activeEntry.updatedBy && (
-                            <div className="text-[10px] text-[#555] mt-0.5">
-                              <span className="font-bold">Last edited by:</span> {activeEntry.updatedBy}
-                              {activeEntry.updatedAt && <span className="text-[#999] ml-1">· {new Date(activeEntry.updatedAt).toLocaleString()}</span>}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )}
+                          </td>
+                        </tr>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>

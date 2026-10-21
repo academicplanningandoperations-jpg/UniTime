@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Wrench, ChevronDown, Save, LogOut, FileText, FileUp, Users, MapPin, GraduationCap, BookOpen, LayoutGrid, Cloud, Menu, X
+  Wrench, ChevronDown, Save, LogOut, FileText, FileUp, Users, MapPin, GraduationCap, BookOpen, LayoutGrid, Menu, X
 } from 'lucide-react';
 import { Role, UserAccount, ViewType, Term } from '../types';
 import Logo from './Logo';
@@ -172,11 +172,6 @@ const TopNav: React.FC<TopNavProps> = ({
 
         <div className="flex items-center gap-3 h-full pb-[2px]">
           {termSwitcher(false)}
-          {isSupabaseConnected && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[#eafbef] text-[#2e7d32] border border-[#a5d6a7] text-[10px] uppercase font-bold">
-              <Cloud className="w-3 h-3" /> SYNC
-            </div>
-          )}
           <div className="flex items-center gap-1.5 bg-white text-[#185baf] px-2 py-0.5 border border-[#ccc] text-[11px] font-bold cursor-default">
             <div className="bg-[#185baf] text-white w-4 h-4 flex items-center justify-center font-bold">S</div>
             {currentUser.name}
@@ -198,11 +193,6 @@ const TopNav: React.FC<TopNavProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {isSupabaseConnected && (
-            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-[#eafbef] text-[#2e7d32] border border-[#a5d6a7] text-[9px] uppercase font-bold">
-              <Cloud className="w-2.5 h-2.5" /> SYNC
-            </div>
-          )}
           <button
             onClick={() => setIsMobileMenuOpen(prev => !prev)}
             className="flex items-center justify-center w-8 h-8 hover:bg-[#124584] transition-colors"

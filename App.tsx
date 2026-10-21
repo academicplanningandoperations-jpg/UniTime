@@ -32,6 +32,7 @@ import { DataService } from './services/dataService';
 import { supabase } from './services/supabase';
 import { AuthService } from './services/authService';
 import { UsageMeter, startUsageReporting } from './services/usageMeter';
+import TermSwitchLoader from './components/TermSwitchLoader';
 
 const App: React.FC = () => {
   // Who is signed in comes from the Supabase Auth session (checked by the
@@ -62,6 +63,8 @@ const App: React.FC = () => {
   };
 
   const [isSyncing, setIsSyncing] = useState(false);
+  // Name of the term being switched to while its data loads (shows the loader).
+  const [termLoading, setTermLoading] = useState<string | null>(null);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
 
   // Undo/redo stacks — stored in refs so keyboard handler always sees current value
@@ -435,6 +438,10 @@ const App: React.FC = () => {
     // picked in the timetable windows doesn't exist in the new term.
     setPanels(prev => prev.map(p => ({ ...p, viewId: '' })));
 
+    // Blur the screen and show the loader while the other term's data arrives.
+    setTermLoading(effectiveActiveTerm?.name || termId);
+    const loadStarted = Date.now();
+
     const reloadForTerm = async () => {
       setIsSyncing(true);
       isSyncingRef.current = true;
@@ -458,6 +465,10 @@ const App: React.FC = () => {
       } finally {
         setIsSyncing(false);
         isSyncingRef.current = false;
+        // Keep it up at least briefly so it doesn't just flash. If the person
+        // has already switched again, that newer switch clears it instead.
+        const wait = Math.max(0, 450 - (Date.now() - loadStarted));
+        setTimeout(() => { if (activeTermIdRef.current === termId) setTermLoading(null); }, wait);
       }
     };
     reloadForTerm();
@@ -1298,6 +1309,8 @@ const App: React.FC = () => {
         onExportPDF={handleExportPDF}
         onExportExcel={handleExportExcel}
       />
+
+      {termLoading && <TermSwitchLoader termName={termLoading} />}
 
       <main className="flex-1 relative overflow-hidden bg-[#f0f6ff]">
         <div className="h-full w-full overflow-auto custom-scrollbar">

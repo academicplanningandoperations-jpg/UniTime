@@ -305,33 +305,24 @@ function wouldCreateLongRun(
   return false;
 }
 
-// Gap rule for a cohort's day. Between two classes the cohort may wait:
-//   • at most 2 hours if the gap contains its lunch hour (lunch included), or
-//   • at most 1 hour otherwise.
-// Hours blocked by other settings (CohortBlockTime, Explo blocks) count as
-// waiting time too — only real classes end a gap. `classOcc` therefore holds
-// classes only, never blocks.
-// Returns true if placing newKeys would add waiting time beyond that rule.
+// Gap rule for a cohort's day: between two classes the cohort waits at most
+// MAX_GAP_HOURS on the clock, whatever fills that time — lunch, Explo blocks,
+// CohortBlockTime or nothing. Only real classes end a gap, so `classOcc` holds
+// classes only, never blocked hours.
+// Returns true if placing newKeys would add waiting time beyond that limit.
 // A day that already breaks the rule (e.g. sessions added by hand) is not
 // locked: a placement is refused only if it makes the excess bigger.
-// Examples (lunch at 13):
-//   10–11 and 12–13 → gap [11]          = 1, no lunch    → allow
-//   10–11 and 13–14 → gap [11,12]       = 2, no lunch    → reject
-//   11–12 and 14–15 → gap [12,13]       = 2, has lunch   → allow
-//   11–12 and 15–16 → gap [12,13,14]    = 3, has lunch   → reject
-const GAP_LIMIT_WITH_LUNCH = 2;
-const GAP_LIMIT_WITHOUT_LUNCH = 1;
+// Examples:
+//   10–11 and 13–14 → gap [11,12]       = 2 → allow
+//   10–11 and 14–15 → gap [11,12,13]    = 3 → reject (even if 13 is lunch)
+const MAX_GAP_HOURS = 2;
 
-function gapExcess(hours: Set<number>, lunch: Set<number>): number {
+function gapExcess(hours: Set<number>): number {
   const sorted = Array.from(hours).sort((a, b) => a - b);
   let excess = 0;
   for (let i = 1; i < sorted.length; i++) {
     const gap = sorted[i] - sorted[i - 1] - 1;
-    if (gap <= 0) continue;
-    let hasLunch = false;
-    for (let h = sorted[i - 1] + 1; h < sorted[i]; h++) if (lunch.has(h)) { hasLunch = true; break; }
-    const limit = hasLunch ? GAP_LIMIT_WITH_LUNCH : GAP_LIMIT_WITHOUT_LUNCH;
-    if (gap > limit) excess += gap - limit;
+    if (gap > MAX_GAP_HOURS) excess += gap - MAX_GAP_HOURS;
   }
   return excess;
 }
@@ -341,7 +332,6 @@ function wouldBreakGapRule(
   groupId: string,
   day: string,
   newKeys: string[],
-  lunchHours: number[] = []
 ): boolean {
   const prefix = `${day}~`;
   const before = new Set<number>();
@@ -350,8 +340,7 @@ function wouldBreakGapRule(
   if (before.size === 0) return false; // first class of the day — no gap yet
   const after = new Set(before);
   for (const k of newKeys) if (k.startsWith(prefix)) { const h = parseInt(k.slice(prefix.length)); if (!isNaN(h)) after.add(h); }
-  const lunch = new Set(lunchHours);
-  return gapExcess(after, lunch) > gapExcess(before, lunch);
+  return gapExcess(after) > gapExcess(before);
 }
 
 // ─── conflict diagnostics ────────────────────────────────────────────────────
@@ -394,7 +383,7 @@ function buildDiagnostics(
     const list = asgn.cohorts.slice(0, 3).join(', ') + (asgn.cohorts.length > 3 ? '…' : '');
     primaryReason = `Cohort(s) ${list} fully booked on ${rejCohort} of ${totalCandidates} candidate slots`;
     suggestions.push(`Cohorts may be over-scheduled — check CohortBlockDay/Time or other courses sharing ${list}.`);
-    suggestions.push(`The gap rule may be limiting it: between classes a cohort may wait at most 1 hour, or 2 hours when the gap includes lunch (blocked hours count as waiting). Free days or a wider lunch range give more options.`);
+    suggestions.push(`The gap rule may be limiting it: between two classes a cohort waits at most 2 hours, counting lunch and blocked hours. More free days or fewer blocks give more options.`);
     if (asgn.cohortBlockDay || asgn.dayForBlock)
       suggestions.push(`CohortBlockDay="${asgn.cohortBlockDay}" / Explo-Day-Block="${asgn.dayForBlock}" is further limiting cohort availability.`);
   } else if (top.name === 'consec' && rejConsec > 0) {
@@ -452,9 +441,7 @@ export async function runAutoScheduler(
   // Classes only (no blocked hours) — used for the gap rule, where a blocked
   // hour counts as waiting time rather than as a class.
   const cohortClassOcc   = new Map<string, Set<string>>();
-  // The lunch hours that applied to each placed session's row, so the
-  // tidy-up pass at the end judges gaps the same way as the placement did.
-  const entryLunch = new Map<ScheduleEntry, number[]>();
+
   const roomOcc          = new Map<string, Set<string>>();
   const usedDays         = new Map<string, Set<string>>();
 
@@ -865,7 +852,6 @@ export async function runAutoScheduler(
       } as ScheduleEntry;
       entries.push(entry);
       if (cohortWin) entryWindow.set(entry, { start: winStart, end: winEnd });
-      entryLunch.set(entry, effLunch);
 
       placed++;
       onProgress(entries.length, totalSessions, `${asgn.courseCode} · ${asgn.cohorts[0] ?? ''}`);
@@ -883,7 +869,7 @@ export async function runAutoScheduler(
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
       if (groups.some(g => !cohortFree(g.id, keys))) { rejCohort++; continue; }
       if (effLunch.length > 0 && groups.some(g => !leavesLunchFree(cohortOcc, g.id, day, effLunch, keys))) { rejCohort++; continue; }
-      if (groups.some(g => wouldBreakGapRule(cohortClassOcc, g.id, day, keys, effLunch))) { rejCohort++; continue; }
+      if (groups.some(g => wouldBreakGapRule(cohortClassOcc, g.id, day, keys))) { rejCohort++; continue; }
       if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; continue; }
 
       const pickedRoom = pickRoomFor(keys);
@@ -986,7 +972,7 @@ export async function runAutoScheduler(
           if (entry.facultyId && !isFree(facultyOcc, entry.facultyId, newKeys)) continue;
           if (gids.some(gid => !isFree(cohortOcc, gid, newKeys)))               continue;
           if (gids.some(gid => !leavesLunchFree(cohortOcc, gid, tDay, CONSOLIDATION_LUNCH, newKeys))) continue;
-          if (gids.some(gid =>  wouldBreakGapRule(cohortClassOcc, gid, tDay, newKeys, entryLunch.get(entry) ?? CONSOLIDATION_LUNCH))) continue;
+          if (gids.some(gid =>  wouldBreakGapRule(cohortClassOcc, gid, tDay, newKeys))) continue;
 
           // Prefer the session's original room; fall back to any free room
           const origRoom = existingRooms.find(r => r.id === entry.roomId);

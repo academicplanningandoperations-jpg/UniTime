@@ -603,6 +603,43 @@ export async function runAutoScheduler(
     courseRows.filter(a => a.cohorts.some(c => { const g = findGroup(c); return !!g && cohortWindow.has(g.id); })));
   const hasCohortWindow = (a: CourseAssignment) => windowedRows.has(a);
 
+  // ── At most ONE free day per cohort ──────────────────────────────────────
+  // A cohort's week is every working day of the rows it appears in. It must
+  // have classes on all but one of those days (or on as many days as it has
+  // sessions, if that is fewer). This outranks the habit of packing classes
+  // onto days the cohort already uses.
+  const sessionsForRow = (a: CourseAssignment) => {
+    const c = parseElective(a.category)?.base ?? a.category.toLowerCase();
+    return c === 'tutorial' ? 1 : c === 'mba' ? Math.round(a.credits / 1.5) : c === 'edge' ? Math.round(a.credits / 2) : a.credits;
+  };
+  const cohortWeek = new Map<string, Set<string>>();
+  const cohortNewSessions = new Map<string, number>();
+  for (const a of courseRows) {
+    const rowDays = parseDays(a.workingDays).length ? parseDays(a.workingDays) : DAYS_MAP['Mon-Fri'];
+    const n = sessionsForRow(a);
+    for (const g of a.cohorts.map(findGroup).filter(Boolean) as StudentGroup[]) {
+      const w = cohortWeek.get(g.id) ?? new Set<string>();
+      rowDays.forEach(d => w.add(d));
+      cohortWeek.set(g.id, w);
+      cohortNewSessions.set(g.id, (cohortNewSessions.get(g.id) ?? 0) + n);
+    }
+  }
+  const cohortDaysUsed = (gid: string): number => {
+    const w = cohortWeek.get(gid);
+    if (!w) return 0;
+    let n = 0;
+    w.forEach(d => { if ((cohortDaySessionCount.get(`${gid}~${d}`) ?? 0) > 0) n++; });
+    return n;
+  };
+  const requiredDays = new Map<string, number>();
+  cohortWeek.forEach((w, gid) => {
+    requiredDays.set(gid, Math.min(w.size - 1, cohortDaysUsed(gid) + (cohortNewSessions.get(gid) ?? 0)));
+  });
+  const needsMoreDays = (gid: string) => cohortDaysUsed(gid) < (requiredDays.get(gid) ?? 0);
+  // What each placed session was allowed to do, so the repair pass at the end
+  // only moves it to a day/time its row would have accepted.
+  const entryRules = new Map<ScheduleEntry, { days: string[]; hours: Set<number> | null; isLab: boolean; lunch: number[] }>();
+
   // Sort order (most constrained → least constrained):
   // 1. Course-Day-Block courses first — they have the fewest candidate slots so must
   //    claim them before other courses fill the cohort's schedule. No pre-reservation
@@ -759,7 +796,14 @@ export async function runAutoScheduler(
     const cS1 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) === 1));
     const cS3 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) >= 3));
     const cS0 = shuffle(rawCandidates.filter(c => cohortSessionsOnDay(c.day) === 0));
-    const tiered = [...cS2, ...cS1, ...cS3, ...cS0];
+    let tiered = [...cS2, ...cS1, ...cS3, ...cS0];
+    // A cohort that still has more than one free day gets its empty days first
+    // (stable sort: the tier order above still decides among equal days).
+    const spreading = groups.filter(g => needsMoreDays(g.id));
+    if (spreading.length > 0) {
+      const freshFor = (day: string) => spreading.filter(g => (cohortDaySessionCount.get(`${g.id}~${day}`) ?? 0) === 0).length;
+      tiered = [...tiered].sort((a, b) => freshFor(b.day) - freshFor(a.day));
+    }
 
     // Elective basket: a slot the cohort already uses for another course of the
     // same basket counts as free, and such slots are tried FIRST so the basket's
@@ -852,6 +896,7 @@ export async function runAutoScheduler(
       } as ScheduleEntry;
       entries.push(entry);
       if (cohortWin) entryWindow.set(entry, { start: winStart, end: winEnd });
+      entryRules.set(entry, { days: candidateDays, hours: allowedHours, isLab, lunch: effLunch });
 
       placed++;
       onProgress(entries.length, totalSessions, `${asgn.courseCode} · ${asgn.cohorts[0] ?? ''}`);
@@ -930,6 +975,9 @@ export async function runAutoScheduler(
 
       // Only relocate if this is a lonely day (exactly 1 session) for ≥1 cohort
       if (!gids.some(gid => (snap.get(`${gid}~${entry.day}`) ?? 0) === 1)) continue;
+      // …but never if emptying that day would give a cohort a second free day.
+      if (gids.some(gid => (cohortDaySessionCount.get(`${gid}~${entry.day}`) ?? 0) === 1
+        && cohortDaysUsed(gid) <= (requiredDays.get(gid) ?? 0))) continue;
 
       // Prevent same-course landing on the same day twice (mirrors takenDays)
       const sameCourseDays = new Set<string>(
@@ -1013,6 +1061,96 @@ export async function runAutoScheduler(
       }
     }
     if (!improved) break; // no moves made — further sweeps won't help
+  }
+
+  // ── Repair: cohorts still left with more than one free day ────────────────
+  // Move one of the cohort's classes from a day where it has 2+ classes onto
+  // an empty day, keeping every rule: no faculty/room/cohort clash, the 2-hour
+  // gap rule (on both days), a free lunch hour, the row's working days and
+  // course day/time blocks, and the same course not twice on one day.
+  const gapOk = (gid: string, day: string): boolean => {
+    const prefix = `${day}~`;
+    const hrs: number[] = [];
+    cohortClassOcc.get(gid)?.forEach(k => { if (k.startsWith(prefix)) hrs.push(parseInt(k.slice(prefix.length))); });
+    hrs.sort((a, b) => a - b);
+    for (let i = 1; i < hrs.length; i++) if (hrs[i] - hrs[i - 1] - 1 > MAX_GAP_HOURS) return false;
+    return true;
+  };
+  for (let round = 0; round < 6; round++) {
+    let progress = false;
+    for (const [gid, week] of cohortWeek) {
+      if (!needsMoreDays(gid)) continue;
+      const emptyDays = Array.from(week).filter(d => (cohortDaySessionCount.get(`${gid}~${d}`) ?? 0) === 0);
+      const movable = entries.filter(e =>
+        (e.groupIds ?? []).includes(gid) && !parseElective(e.category) && entryRules.has(e) &&
+        (cohortDaySessionCount.get(`${gid}~${e.day}`) ?? 0) >= 2);
+      let movedOne = false;
+      for (const tDay of emptyDays) {
+        for (const entry of movable) {
+          const rules = entryRules.get(entry)!;
+          if (!rules.days.includes(tDay)) continue;
+          const gids = entry.groupIds ?? [];
+          // Other cohorts on this session must not lose a day they need.
+          if (gids.some(g => g !== gid && (cohortDaySessionCount.get(`${g}~${entry.day}`) ?? 0) === 1
+            && cohortDaysUsed(g) <= (requiredDays.get(g) ?? 0))) continue;
+          const sameCourseDay = entries.some(e => e !== entry && e.day === tDay && e.courseId === entry.courseId
+            && e.facultyId === entry.facultyId && (e.groupIds ?? []).some(g => gids.includes(g)));
+          if (sameCourseDay) continue;
+
+          const [sH, sM] = entry.startTime.split(':').map(Number);
+          const [eH, eM] = entry.endTime.split(':').map(Number);
+          const durH = (eH - sH) + (eM - sM) / 60;
+          const oldDay = entry.day as string;
+          const oldKeys = slotKeys(oldDay, entry.startTime, entry.endTime);
+          if (entry.facultyId) removeBusy(facultyOcc, entry.facultyId, oldKeys);
+          gids.forEach(g => { removeBusy(cohortOcc, g, oldKeys); removeBusy(cohortClassOcc, g, oldKeys); });
+          if (entry.roomId) removeBusy(roomOcc, entry.roomId, oldKeys);
+
+          // The day it leaves must still respect the gap rule for every cohort.
+          let placedAt: { startTime: string; endTime: string } | null = null;
+          if (gids.every(g => gapOk(g, oldDay))) {
+            const win = entryWindow.get(entry);
+            let slots = buildSlots(win ? win.start : 8, win ? win.end : 19, durH);
+            if (rules.hours) slots = slots.filter(sl => rules.hours!.has(parseInt(sl.startTime)));
+            if (rules.isLab && !rules.hours) slots = slots.filter(sl => parseInt(sl.startTime) % 2 === 0);
+            for (const { startTime, endTime } of slots) {
+              const newKeys = slotKeys(tDay, startTime, endTime);
+              if (entry.facultyId && !isFree(facultyOcc, entry.facultyId, newKeys)) continue;
+              if (gids.some(g => !isFree(cohortOcc, g, newKeys))) continue;
+              if (rules.lunch.length > 0 && gids.some(g => !leavesLunchFree(cohortOcc, g, tDay, rules.lunch, newKeys))) continue;
+              if (gids.some(g => wouldBreakGapRule(cohortClassOcc, g, tDay, newKeys))) continue;
+              // Same room only, so room type and campus stay right.
+              if (entry.roomId && !isFree(roomOcc, entry.roomId, newKeys)) continue;
+              placedAt = { startTime, endTime };
+              break;
+            }
+          }
+          if (!placedAt) {
+            if (entry.facultyId) markBusy(facultyOcc, entry.facultyId, oldKeys);
+            gids.forEach(g => { markBusy(cohortOcc, g, oldKeys); markBusy(cohortClassOcc, g, oldKeys); });
+            if (entry.roomId) markBusy(roomOcc, entry.roomId, oldKeys);
+            continue;
+          }
+          const newKeys = slotKeys(tDay, placedAt.startTime, placedAt.endTime);
+          if (entry.facultyId) markBusy(facultyOcc, entry.facultyId, newKeys);
+          gids.forEach(g => {
+            markBusy(cohortOcc, g, newKeys);
+            markBusy(cohortClassOcc, g, newKeys);
+            cohortDaySessionCount.set(`${g}~${tDay}`, (cohortDaySessionCount.get(`${g}~${tDay}`) ?? 0) + 1);
+            cohortDaySessionCount.set(`${g}~${oldDay}`, Math.max(0, (cohortDaySessionCount.get(`${g}~${oldDay}`) ?? 1) - 1));
+          });
+          if (entry.roomId) markBusy(roomOcc, entry.roomId, newKeys);
+          entry.day = tDay as typeof entry.day;
+          entry.startTime = placedAt.startTime;
+          entry.endTime = placedAt.endTime;
+          movedOne = true;
+          progress = true;
+          break;
+        }
+        if (movedOne) break; // re-check this cohort next round
+      }
+    }
+    if (!progress) break;
   }
 
   return {

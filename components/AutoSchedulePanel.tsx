@@ -741,7 +741,8 @@ const AutoSchedulePanel: React.FC<Props> = ({
                                         <span className="block text-[8px] text-[#b45309] mt-0.5">
                                           {d.totalCandidates} candidates checked
                                         </span>
-                                      )}                                    </td>
+                                      )}
+                                    </td>
                                     <td className="px-2 py-1.5 text-[#64748b] max-w-[180px]">
                                       <span className="block leading-tight text-[8px]">
                                         {d?.suggestions[0] ?? '—'}

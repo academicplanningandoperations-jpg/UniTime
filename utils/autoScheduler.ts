@@ -617,9 +617,10 @@ export async function runAutoScheduler(
   //  • A day with classes has at least MIN_DAY_CLASSES classes (a 2-hour lab
   //    is one class) — no coming in for a single class. A course still never
   //    appears twice on the same day.
-  //  • At most one free day in the cohort's week (the working days of its
-  //    rows), unless it has too few classes to give that many days
-  //    MIN_DAY_CLASSES each — then it gets as many days as its classes allow.
+  //  • Classes on every day of the cohort's week (the working days of its
+  //    rows) — no free day is required. If it has too few classes to give
+  //    every day MIN_DAY_CLASSES, it gets as many days as its classes allow.
+  //    A cohort with enough classes never ends up with more than one free day.
   const MIN_DAY_CLASSES = 2;
   const rowSessions = (a: CourseAssignment) => {
     const c = parseElective(a.category)?.base ?? a.category.toLowerCase();
@@ -665,7 +666,7 @@ export async function runAutoScheduler(
   cohortWeek.forEach((w, gid) => {
     let total = cohortNewClasses.get(gid) ?? 0;
     w.forEach(d => { total += dayClasses(gid, d); });
-    requiredDays.set(gid, Math.max(Math.min(1, total), Math.min(w.size - 1, Math.floor(total / MIN_DAY_CLASSES))));
+    requiredDays.set(gid, Math.max(Math.min(1, total), Math.min(w.size, Math.floor(total / MIN_DAY_CLASSES))));
   });
   const needsMoreDays = (gid: string) => cohortDaysUsed(gid) < (requiredDays.get(gid) ?? 0);
 
@@ -693,11 +694,11 @@ export async function runAutoScheduler(
   const siblingsOf = (gid: string): string[] => (pairMembers.get(pairRoot(gid)) ?? []).filter(x => x !== gid);
 
   // ── Planned class days ────────────────────────────────────────────────────
-  // Each group of paired cohorts gets its class days decided up front: its
-  // week minus the free day(s) it is allowed. The free day is the one fewest
-  // of its rows' faculty can teach on (so it costs the least). Sessions then
-  // go to the planned day with the fewest hours so far, which fills every
-  // planned day evenly to MIN_DAY_CLASSES and avoids one-class days.
+  // Each group of paired cohorts gets its class days decided up front: all of
+  // its week when it has enough classes, otherwise only as many days as give
+  // each MIN_DAY_CLASSES — dropping the days fewest of its rows' faculty can
+  // teach on. Sessions then go to the planned day with the fewest classes so
+  // far, which fills every planned day evenly and avoids one-class days.
   const plannedDays = new Map<string, Set<string>>();
   pairMembers.forEach(members => {
     const week = new Set<string>();

@@ -671,7 +671,30 @@ export async function runAutoScheduler(
     w.forEach(d => { total += dayClasses(gid, d); });
     requiredDays.set(gid, Math.max(Math.min(1, total), Math.min(w.size, Math.floor(total / MIN_DAY_CLASSES))));
   });
-  const needsMoreDays = (gid: string) => cohortDaysUsed(gid) < (requiredDays.get(gid) ?? 0);
+
+  // Which day may be left free: only Saturday (first choice) or Monday —
+  // never a day in the middle of the week. A cohort with enough classes may
+  // have at most one free day; one with very few classes may need more, and
+  // then Saturday and Monday are freed first, a middle day only after them.
+  const EDGE_FREE_DAYS = ['Saturday', 'Monday'];
+  const dayRank = (d: string) => { const i = EDGE_FREE_DAYS.indexOf(d); return i < 0 ? 2 : i; };
+  const freeAllowed = (gid: string) => Math.max(1, (cohortWeek.get(gid)?.size ?? 0) - (requiredDays.get(gid) ?? 0));
+  const freeDays = (gid: string) => (cohortWeek.get(gid)?.size ?? 0) - cohortDaysUsed(gid);
+  const mayBeFree = (gid: string, day: string): boolean => {
+    const w = cohortWeek.get(gid);
+    if (!w) return true;
+    if (freeDays(gid) + 1 > freeAllowed(gid)) return false;
+    if (EDGE_FREE_DAYS.includes(day)) return true;
+    return EDGE_FREE_DAYS.every(d => !w.has(d) || dayClasses(gid, d) === 0);
+  };
+  // An empty day that shouldn't be: too many free days, or a middle day free
+  // while Saturday/Monday still has classes.
+  const wronglyFree = (gid: string, day: string): boolean => {
+    const w = cohortWeek.get(gid);
+    if (!w || dayClasses(gid, day) > 0) return false;
+    if (freeDays(gid) > freeAllowed(gid)) return true;
+    return !EDGE_FREE_DAYS.includes(day) && EDGE_FREE_DAYS.some(d => w.has(d) && dayClasses(gid, d) > 0);
+  };
 
   // ── Cohorts that share classes (e.g. BT-CSE-B1 + B2 for theory) ──────────
   // Their separate labs are lined up in the same slots, so both batches are
@@ -714,13 +737,14 @@ export async function runAutoScheduler(
       const rowDays = parseDays(a.workingDays).length ? parseDays(a.workingDays) : DAYS_MAP['Mon-Fri'];
       rowDays.forEach(d => avail.set(d, (avail.get(d) ?? 0) + rowHours(a)));
     }
-    const order = Array.from(week).sort((x, y) => (avail.get(y) ?? 0) - (avail.get(x) ?? 0)); // most-available first
+    // Middle days first, then Monday, then Saturday; most-available first within each.
+    const order = Array.from(week).sort((x, y) => (dayRank(y) - dayRank(x)) || ((avail.get(y) ?? 0) - (avail.get(x) ?? 0)));
     const days = new Set(order.slice(0, Math.max(1, need)));
     members.forEach(g => plannedDays.set(g, new Set(Array.from(days).filter(d => cohortWeek.get(g)?.has(d)))));
   });
   // What each placed session was allowed to do, so the repair pass at the end
   // only moves it to a day/time its row would have accepted.
-  const entryRules = new Map<ScheduleEntry, { days: string[]; hours: Set<number> | null; isLab: boolean; lunch: number[] }>();
+  const entryRules = new Map<ScheduleEntry, { days: string[]; hours: Set<number> | null; isLab: boolean; lunch: number[]; pickRoom?: (keys: string[]) => Room | undefined }>();
 
   // Sort order (most constrained → least constrained):
   // 1. Course-Day-Block courses first — they have the fewest candidate slots so must
@@ -1020,7 +1044,7 @@ export async function runAutoScheduler(
       } as ScheduleEntry;
       entries.push(entry);
       if (cohortWin) entryWindow.set(entry, { start: winStart, end: winEnd });
-      entryRules.set(entry, { days: candidateDays, hours: allowedHours, isLab, lunch: effLunch });
+      entryRules.set(entry, { days: candidateDays, hours: allowedHours, isLab, lunch: effLunch, pickRoom: pickRoomFor });
 
       placed++;
       onProgress(entries.length, totalSessions, `${asgn.courseCode} · ${asgn.cohorts[0] ?? ''}`);
@@ -1119,7 +1143,7 @@ export async function runAutoScheduler(
     const oldDay = entry.day as string;
     const oldKeys = slotKeys(oldDay, entry.startTime, entry.endTime);
     occupy(entry, oldKeys, false);
-    let best: { startTime: string; endTime: string; score: number } | null = null;
+    let best: { startTime: string; endTime: string; score: number; roomId: string } | null = null;
     if (gids.every(g => gapOk(g, oldDay))) {
       const win = entryWindow.get(entry);
       let slots = buildSlots(win ? win.start : 8, win ? win.end : 19, durationOf(entry));
@@ -1132,7 +1156,9 @@ export async function runAutoScheduler(
         if (rules.lunch.length > 0 && gids.some(g => !leavesLunchFree(lunchOcc, g, tDay, rules.lunch, k))) continue;
         if (gids.some(g => wouldBreakGapRule(cohortClassOcc, g, tDay, k))) continue;
         if (!rules.isLab && entry.facultyId && wouldCreateLongRun(facultyNonLabOcc, entry.facultyId, tDay, k)) continue;
-        if (entry.roomId && !isFree(roomOcc, entry.roomId, k)) continue;
+        // Same room if it's free then, otherwise any room this course's row allows.
+        const roomId = (entry.roomId && isFree(roomOcc, entry.roomId, k)) ? entry.roomId : (rules.pickRoom?.(k)?.id ?? null);
+        if (!roomId) continue;
         // Prefer the slot closest to the cohorts' other classes that day.
         const st = parseInt(sl.startTime), en = st + k.length;
         let score = 0;
@@ -1147,13 +1173,15 @@ export async function runAutoScheduler(
           });
           score += Math.max(0, near);
         }
-        if (!best || score < best.score) best = { startTime: sl.startTime, endTime: sl.endTime, score };
+        if (roomId !== entry.roomId) score += 0.5; // keep the same room when it's a tie
+        if (!best || score < best.score) best = { startTime: sl.startTime, endTime: sl.endTime, score, roomId };
       }
     }
     if (!best) { occupy(entry, oldKeys, true); return false; }
     entry.day = tDay as typeof entry.day;
     entry.startTime = best.startTime;
     entry.endTime = best.endTime;
+    entry.roomId = best.roomId;
     occupy(entry, slotKeys(tDay, best.startTime, best.endTime), true);
     gids.forEach(g => {
       cohortDaySessionCount.set(`${g}~${tDay}`, (cohortDaySessionCount.get(`${g}~${tDay}`) ?? 0) + 1);
@@ -1161,11 +1189,10 @@ export async function runAutoScheduler(
     });
     return true;
   };
-  const req = (g: string) => requiredDays.get(g) ?? 0;
   // Taking one class off `day` leaves that day fine for cohort g?
   const leavesDayOk = (g: string, day: string) => {
     const left = dayClasses(g, day) - 1;
-    return left >= MIN_DAY_CLASSES || (left <= 0 && cohortDaysUsed(g) - 1 >= req(g));
+    return left >= MIN_DAY_CLASSES || (left <= 0 && mayBeFree(g, day));
   };
   // Adding one class to `day` doesn't create a new one-class day for cohort g?
   const joinsDayOk = (g: string, day: string) => dayClasses(g, day) > 0;
@@ -1173,10 +1200,11 @@ export async function runAutoScheduler(
   for (let round = 0; round < 8; round++) {
     let progress = false;
 
-    // (a) Cohorts with more than one free day: move a class onto an empty day.
+    // (a) Days that shouldn't be free (a middle day, or too many free days):
+    //     move classes onto them from fuller days.
     for (const [gid, week] of cohortWeek) {
-      if (!needsMoreDays(gid)) continue;
-      const emptyDays = Array.from(week).filter(d => dayHours(gid, d) === 0);
+      const emptyDays = Array.from(week).filter(d => wronglyFree(gid, d)).sort((x, y) => dayRank(y) - dayRank(x));
+      if (emptyDays.length === 0) continue;
       const cands = entries
         .filter(e => movable(e) && (e.groupIds ?? []).includes(gid))
         .filter(e => (e.groupIds ?? []).every(g => leavesDayOk(g, e.day as string)));
@@ -1188,30 +1216,41 @@ export async function runAutoScheduler(
       }
     }
 
-    // (b) One-class days (some classes, under MIN_DAY_CLASSES): top them up from
-    //     fuller days, or empty them onto the cohort's other class days.
+    // (b) One-class days. On Saturday/Monday, first move the class to a free
+    //     slot on another class day so the whole day is free; otherwise (and
+    //     on middle days) bring a second class to it from a fuller day.
     for (const [gid, week] of cohortWeek) {
-      for (const d of week) {
+      const days = Array.from(week).sort((x, y) => dayRank(x) - dayRank(y)); // Saturday, Monday, then the rest
+      for (const d of days) {
         const h = dayClasses(gid, d);
         if (h === 0 || h >= MIN_DAY_CLASSES) continue;
-        const donors = entries
-          .filter(e => movable(e) && e.day !== d && (e.groupIds ?? []).includes(gid))
-          .filter(e => (e.groupIds ?? []).every(g => leavesDayOk(g, e.day as string)
-            && (g === gid || joinsDayOk(g, d))));
-        for (const e of donors) {
-          if (dayClasses(gid, d) >= MIN_DAY_CLASSES) break;
-          if (moveEntry(e, d)) progress = true;
-        }
-        if (dayClasses(gid, d) >= MIN_DAY_CLASSES || dayClasses(gid, d) === 0) continue;
-        if (cohortDaysUsed(gid) - 1 < req(gid)) continue; // this day is needed
-        const here = entries.filter(e => movable(e) && e.day === d && (e.groupIds ?? []).includes(gid));
-        for (const e of here) {
-          for (const tDay of week) {
-            if (tDay === d || dayClasses(gid, tDay) === 0) continue;
-            if (!(e.groupIds ?? []).every(g => g === gid
-              || (leavesDayOk(g, d) && joinsDayOk(g, tDay)))) continue;
-            if (moveEntry(e, tDay)) { progress = true; break; }
+        const emptyIt = (): boolean => {
+          if (!mayBeFree(gid, d)) return false;
+          const here = entries.filter(e => movable(e) && e.day === d && (e.groupIds ?? []).includes(gid));
+          for (const e of here) {
+            const targets = Array.from(week).filter(t => t !== d && dayClasses(gid, t) > 0).sort((x, y) => dayRank(y) - dayRank(x));
+            for (const tDay of targets) {
+              if (!(e.groupIds ?? []).every(g => g === gid || (leavesDayOk(g, d) && joinsDayOk(g, tDay)))) continue;
+              if (moveEntry(e, tDay)) { progress = true; break; }
+            }
           }
+          return dayClasses(gid, d) === 0;
+        };
+        const topUp = () => {
+          const donors = entries
+            .filter(e => movable(e) && e.day !== d && (e.groupIds ?? []).includes(gid))
+            .filter(e => (e.groupIds ?? []).every(g => leavesDayOk(g, e.day as string)
+              && (g === gid || joinsDayOk(g, d))));
+          for (const e of donors) {
+            if (dayClasses(gid, d) >= MIN_DAY_CLASSES) break;
+            if (moveEntry(e, d)) progress = true;
+          }
+        };
+        if (EDGE_FREE_DAYS.includes(d)) {
+          if (!emptyIt()) topUp();
+        } else {
+          topUp();
+          if (dayClasses(gid, d) > 0 && dayClasses(gid, d) < MIN_DAY_CLASSES) emptyIt();
         }
       }
     }

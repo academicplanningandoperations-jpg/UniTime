@@ -309,12 +309,24 @@ const AutoSchedulePanel: React.FC<Props> = ({
   };
 
   // Each run tries slots in a different random order, so results vary. Run
-  // several attempts and keep the one with the fewest unplaced sessions
-  // (then the fewest sessions without a room).
+  // several attempts and keep the best: an unplaced session counts as three
+  // one-class days (a cohort coming in for a single class); then the fewest
+  // sessions without a room breaks a tie.
   const [attempts, setAttempts] = useState<number>(5);
   const [attemptSummary, setAttemptSummary] = useState('');
   const unplacedOf = (r: SchedulerResult) =>
     r.unresolved.reduce((s, u) => s + Math.max(0, u.sessionsNeeded - u.sessionsPlaced), 0);
+  const oneClassDaysOf = (r: SchedulerResult) => {
+    const perDay = new Map<string, number>();
+    for (const e of r.entries) for (const g of e.groupIds ?? []) {
+      const k = `${g}|${e.day}`;
+      perDay.set(k, (perDay.get(k) ?? 0) + 1);
+    }
+    let n = 0;
+    perDay.forEach(c => { if (c === 1) n++; });
+    return n;
+  };
+  const scoreOf = (r: SchedulerResult) => 3 * unplacedOf(r) + oneClassDaysOf(r);
   const handleGenerate = async () => {
     if (!assignments.length) return;
     setResultTermId(activeTermId);
@@ -334,13 +346,13 @@ const AutoSchedulePanel: React.FC<Props> = ({
         schedule,
       );
       scores.push(unplacedOf(res));
-      if (!best || unplacedOf(res) < unplacedOf(best)
-        || (unplacedOf(res) === unplacedOf(best) && res.roomless.length < best.roomless.length)) best = res;
-      if (unplacedOf(best) === 0 && best.roomless.length === 0) break; // can't do better
+      if (!best || scoreOf(res) < scoreOf(best)
+        || (scoreOf(res) === scoreOf(best) && res.roomless.length < best.roomless.length)) best = res;
+      if (scoreOf(best) === 0 && best.roomless.length === 0) break; // can't do better
     }
     setResult(best); setStage('done'); setProgress(100); setLabel('Complete');
-    setAttemptSummary(scores.length > 1
-      ? `Best of ${scores.length} attempts — unplaced ranged ${Math.min(...scores)}–${Math.max(...scores)}; kept the best (${Math.min(...scores)}).`
+    setAttemptSummary(scores.length > 1 && best
+      ? `Best of ${scores.length} attempts — unplaced ranged ${Math.min(...scores)}–${Math.max(...scores)}; kept the one with ${unplacedOf(best)} unplaced and ${oneClassDaysOf(best)} one-class days.`
       : '');
   };
 

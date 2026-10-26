@@ -614,12 +614,17 @@ export async function runAutoScheduler(
   const hasCohortWindow = (a: CourseAssignment) => windowedRows.has(a);
 
   // ── Day rules for every cohort ───────────────────────────────────────────
-  //  • A day with classes has at least MIN_DAY_HOURS hours of them — no
-  //    coming in for a single class.
+  //  • A day with classes has at least MIN_DAY_CLASSES classes (a 2-hour lab
+  //    is one class) — no coming in for a single class. A course still never
+  //    appears twice on the same day.
   //  • At most one free day in the cohort's week (the working days of its
-  //    rows), unless its total hours are too few to give that many days
-  //    MIN_DAY_HOURS each — then it gets as many full days as its hours allow.
-  const MIN_DAY_HOURS = 3;
+  //    rows), unless it has too few classes to give that many days
+  //    MIN_DAY_CLASSES each — then it gets as many days as its classes allow.
+  const MIN_DAY_CLASSES = 2;
+  const rowSessions = (a: CourseAssignment) => {
+    const c = parseElective(a.category)?.base ?? a.category.toLowerCase();
+    return c === 'tutorial' ? 1 : c === 'mba' ? Math.round(a.credits / 1.5) : c === 'edge' ? Math.round(a.credits / 2) : a.credits;
+  };
   const rowHours = (a: CourseAssignment) => {
     const c = parseElective(a.category)?.base ?? a.category.toLowerCase();
     const sessions = c === 'tutorial' ? 1 : c === 'mba' ? Math.round(a.credits / 1.5) : c === 'edge' ? Math.round(a.credits / 2) : a.credits;
@@ -627,15 +632,15 @@ export async function runAutoScheduler(
     return sessions * Math.ceil(dur);
   };
   const cohortWeek = new Map<string, Set<string>>();
-  const cohortNewHours = new Map<string, number>();
+  const cohortNewClasses = new Map<string, number>();
   for (const a of courseRows) {
     const rowDays = parseDays(a.workingDays).length ? parseDays(a.workingDays) : DAYS_MAP['Mon-Fri'];
-    const h = rowHours(a);
+    const n = rowSessions(a);
     for (const g of a.cohorts.map(findGroup).filter(Boolean) as StudentGroup[]) {
       const w = cohortWeek.get(g.id) ?? new Set<string>();
       rowDays.forEach(d => w.add(d));
       cohortWeek.set(g.id, w);
-      cohortNewHours.set(g.id, (cohortNewHours.get(g.id) ?? 0) + h);
+      cohortNewClasses.set(g.id, (cohortNewClasses.get(g.id) ?? 0) + n);
     }
   }
   // Class hours a cohort has on a day (blocked hours don't count).
@@ -647,6 +652,8 @@ export async function runAutoScheduler(
     for (const k of set) if (k.startsWith(prefix)) n++;
     return n;
   };
+  // Classes (sessions) a cohort has on a day.
+  const dayClasses = (gid: string, day: string): number => cohortDaySessionCount.get(`${gid}~${day}`) ?? 0;
   const cohortDaysUsed = (gid: string): number => {
     const w = cohortWeek.get(gid);
     if (!w) return 0;
@@ -656,9 +663,9 @@ export async function runAutoScheduler(
   };
   const requiredDays = new Map<string, number>();
   cohortWeek.forEach((w, gid) => {
-    let total = cohortNewHours.get(gid) ?? 0;
-    w.forEach(d => { total += dayHours(gid, d); });
-    requiredDays.set(gid, Math.max(Math.min(1, total), Math.min(w.size - 1, Math.floor(total / MIN_DAY_HOURS))));
+    let total = cohortNewClasses.get(gid) ?? 0;
+    w.forEach(d => { total += dayClasses(gid, d); });
+    requiredDays.set(gid, Math.max(Math.min(1, total), Math.min(w.size - 1, Math.floor(total / MIN_DAY_CLASSES))));
   });
   const needsMoreDays = (gid: string) => cohortDaysUsed(gid) < (requiredDays.get(gid) ?? 0);
 
@@ -690,7 +697,7 @@ export async function runAutoScheduler(
   // week minus the free day(s) it is allowed. The free day is the one fewest
   // of its rows' faculty can teach on (so it costs the least). Sessions then
   // go to the planned day with the fewest hours so far, which fills every
-  // planned day evenly to MIN_DAY_HOURS and avoids one-class days.
+  // planned day evenly to MIN_DAY_CLASSES and avoids one-class days.
   const plannedDays = new Map<string, Set<string>>();
   pairMembers.forEach(members => {
     const week = new Set<string>();
@@ -845,7 +852,7 @@ export async function runAutoScheduler(
     });
     // Candidate order:
     //  1. the cohort's planned class days before any other day;
-    //  2. among those, days still under MIN_DAY_HOURS first, emptiest first —
+    //  2. among those, days still under MIN_DAY_CLASSES first, emptiest first —
     //     so every planned day fills evenly up to the minimum;
     //  3. within a day, slots right next to the cohort's other classes, so the
     //     day stays one compact block.
@@ -867,11 +874,11 @@ export async function runAutoScheduler(
     };
     // Planned days first; among them the one with the fewest hours so far.
     const offPlan = (day: string) => groups.some(g => !(plannedDays.get(g.id)?.has(day) ?? true)) ? 1 : 0;
-    const fewest = (day: string) => Math.max(0, ...groupIds.map(g => dayHours(g, day)));
+    const fewest = (day: string) => Math.max(0, ...groupIds.map(g => dayClasses(g, day)));
     const scored = shuffle(rawCandidates).map(c => ({
       c, off: offPlan(c.day), load: fewest(c.day), near: closeness(c.day, c.startTime),
     }));
-    scored.sort((x, y) => (x.off - y.off) || (Math.min(x.load, MIN_DAY_HOURS) - Math.min(y.load, MIN_DAY_HOURS)) || (x.near - y.near) || (x.load - y.load));
+    scored.sort((x, y) => (x.off - y.off) || (Math.min(x.load, MIN_DAY_CLASSES) - Math.min(y.load, MIN_DAY_CLASSES)) || (x.near - y.near) || (x.load - y.load));
     let tiered = scored.map(x => x.c);
     // Paired cohorts: a lab goes first into a slot where a paired cohort (one
     // it shares theory with) already has its own lab.
@@ -1040,7 +1047,6 @@ export async function runAutoScheduler(
   // the faculty's 2-hours-in-a-row limit, the row's working days and course
   // day/time blocks, the cohort's time window, the same room, and the same
   // course not twice on one day. Elective-basket sessions stay put.
-  const hoursOf = (e: ScheduleEntry) => slotKeys(e.day, e.startTime, e.endTime).length;
   const durationOf = (e: ScheduleEntry) => {
     const [sH, sM] = e.startTime.split(':').map(Number);
     const [eH, eM] = e.endTime.split(':').map(Number);
@@ -1114,13 +1120,13 @@ export async function runAutoScheduler(
     return true;
   };
   const req = (g: string) => requiredDays.get(g) ?? 0;
-  // Taking `hrs` hours off `day` leaves that day fine for cohort g?
-  const leavesDayOk = (g: string, day: string, hrs: number) => {
-    const left = dayHours(g, day) - hrs;
-    return left >= MIN_DAY_HOURS || (left <= 0 && cohortDaysUsed(g) - 1 >= req(g));
+  // Taking one class off `day` leaves that day fine for cohort g?
+  const leavesDayOk = (g: string, day: string) => {
+    const left = dayClasses(g, day) - 1;
+    return left >= MIN_DAY_CLASSES || (left <= 0 && cohortDaysUsed(g) - 1 >= req(g));
   };
-  // Adding `hrs` hours to `day` doesn't create a new short day for cohort g?
-  const joinsDayOk = (g: string, day: string, hrs: number) => dayHours(g, day) > 0 || hrs >= MIN_DAY_HOURS;
+  // Adding one class to `day` doesn't create a new one-class day for cohort g?
+  const joinsDayOk = (g: string, day: string) => dayClasses(g, day) > 0;
 
   for (let round = 0; round < 8; round++) {
     let progress = false;
@@ -1131,38 +1137,37 @@ export async function runAutoScheduler(
       const emptyDays = Array.from(week).filter(d => dayHours(gid, d) === 0);
       const cands = entries
         .filter(e => movable(e) && (e.groupIds ?? []).includes(gid))
-        .filter(e => (e.groupIds ?? []).every(g => leavesDayOk(g, e.day as string, hoursOf(e))))
-        .sort((x, y) => hoursOf(y) - hoursOf(x)); // longer first: a 2-hour lab gets a new day closer to 3 hours
+        .filter(e => (e.groupIds ?? []).every(g => leavesDayOk(g, e.day as string)));
       outer: for (const tDay of emptyDays) {
         for (const e of cands) {
-          if (!(e.groupIds ?? []).every(g => g === gid || joinsDayOk(g, tDay, hoursOf(e)))) continue;
+          if (!(e.groupIds ?? []).every(g => g === gid || joinsDayOk(g, tDay))) continue;
           if (moveEntry(e, tDay)) { progress = true; break outer; }
         }
       }
     }
 
-    // (b) Short days (some classes, under MIN_DAY_HOURS): top them up from
+    // (b) One-class days (some classes, under MIN_DAY_CLASSES): top them up from
     //     fuller days, or empty them onto the cohort's other class days.
     for (const [gid, week] of cohortWeek) {
       for (const d of week) {
-        const h = dayHours(gid, d);
-        if (h === 0 || h >= MIN_DAY_HOURS) continue;
+        const h = dayClasses(gid, d);
+        if (h === 0 || h >= MIN_DAY_CLASSES) continue;
         const donors = entries
           .filter(e => movable(e) && e.day !== d && (e.groupIds ?? []).includes(gid))
-          .filter(e => (e.groupIds ?? []).every(g => leavesDayOk(g, e.day as string, hoursOf(e))
-            && (g === gid || joinsDayOk(g, d, hoursOf(e)))));
+          .filter(e => (e.groupIds ?? []).every(g => leavesDayOk(g, e.day as string)
+            && (g === gid || joinsDayOk(g, d))));
         for (const e of donors) {
-          if (dayHours(gid, d) >= MIN_DAY_HOURS) break;
+          if (dayClasses(gid, d) >= MIN_DAY_CLASSES) break;
           if (moveEntry(e, d)) progress = true;
         }
-        if (dayHours(gid, d) >= MIN_DAY_HOURS || dayHours(gid, d) === 0) continue;
+        if (dayClasses(gid, d) >= MIN_DAY_CLASSES || dayClasses(gid, d) === 0) continue;
         if (cohortDaysUsed(gid) - 1 < req(gid)) continue; // this day is needed
         const here = entries.filter(e => movable(e) && e.day === d && (e.groupIds ?? []).includes(gid));
         for (const e of here) {
           for (const tDay of week) {
-            if (tDay === d || dayHours(gid, tDay) === 0) continue;
+            if (tDay === d || dayClasses(gid, tDay) === 0) continue;
             if (!(e.groupIds ?? []).every(g => g === gid
-              || (leavesDayOk(g, d, hoursOf(e)) && joinsDayOk(g, tDay, hoursOf(e))))) continue;
+              || (leavesDayOk(g, d) && joinsDayOk(g, tDay)))) continue;
             if (moveEntry(e, tDay)) { progress = true; break; }
           }
         }

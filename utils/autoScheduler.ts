@@ -146,13 +146,16 @@ function isFree(occ: Map<string, Set<string>>, id: string, keys: string[]) {
   return !s || keys.every(k => !s.has(k));
 }
 
-function leavesLunchFree(occ: Map<string, Set<string>>, id: string, day: string, lunchHours: number[], keysToAdd: string[]) {
-  const s = occ.get(id);
+// `occs` lists what takes a lunch hour away: classes and Explo blocks. A
+// CohortBlockDay/Time hour is left out on purpose — it only means "no class
+// here", so lunch can fall on the same hour (e.g. block Wed 12 + lunch 12).
+function leavesLunchFree(occs: Map<string, Set<string>>[], id: string, day: string, lunchHours: number[], keysToAdd: string[]) {
+  const sets = occs.map(o => o.get(id)).filter(Boolean) as Set<string>[];
   let freeCount = 0;
   for (const lh of lunchHours) {
     // Key must match the format used by slotKeys/markBusy: "Monday~12:00"
     const k = `${day}~${pad(lh)}`;
-    const isCurrentlyFree = !s || !s.has(k);
+    const isCurrentlyFree = sets.every(s => !s.has(k));
     const isToBeOccupied = keysToAdd.includes(k);
     if (isCurrentlyFree && !isToBeOccupied) freeCount++;
   }
@@ -441,6 +444,10 @@ export async function runAutoScheduler(
   // Classes only (no blocked hours) — used for the gap rule, where a blocked
   // hour counts as waiting time rather than as a class.
   const cohortClassOcc   = new Map<string, Set<string>>();
+  // Explo-blocked hours only — together with classes, these are what the lunch
+  // check treats as taken (see leavesLunchFree).
+  const cohortExploOcc   = new Map<string, Set<string>>();
+  const lunchOcc         = [cohortClassOcc, cohortExploOcc];
 
   const roomOcc          = new Map<string, Set<string>>();
   const usedDays         = new Map<string, Set<string>>();
@@ -552,7 +559,7 @@ export async function runAutoScheduler(
         for (const hour of parseHours(asgn.timeForBlock)) {
           const key = [`${day}~${pad(hour)}`];
           if (faculty) markBusy(facultyOcc, faculty.id, key);
-          groups.forEach(g => markBusy(cohortOcc, g.id, key));
+          groups.forEach(g => { markBusy(cohortOcc, g.id, key); markBusy(cohortExploOcc, g.id, key); });
         }
       }
     }
@@ -913,7 +920,7 @@ export async function runAutoScheduler(
 
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
       if (groups.some(g => !cohortFree(g.id, keys))) { rejCohort++; continue; }
-      if (effLunch.length > 0 && groups.some(g => !leavesLunchFree(cohortOcc, g.id, day, effLunch, keys))) { rejCohort++; continue; }
+      if (effLunch.length > 0 && groups.some(g => !leavesLunchFree(lunchOcc, g.id, day, effLunch, keys))) { rejCohort++; continue; }
       if (groups.some(g => wouldBreakGapRule(cohortClassOcc, g.id, day, keys))) { rejCohort++; continue; }
       if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; continue; }
 
@@ -1019,7 +1026,7 @@ export async function runAutoScheduler(
 
           if (entry.facultyId && !isFree(facultyOcc, entry.facultyId, newKeys)) continue;
           if (gids.some(gid => !isFree(cohortOcc, gid, newKeys)))               continue;
-          if (gids.some(gid => !leavesLunchFree(cohortOcc, gid, tDay, CONSOLIDATION_LUNCH, newKeys))) continue;
+          if (gids.some(gid => !leavesLunchFree(lunchOcc, gid, tDay, CONSOLIDATION_LUNCH, newKeys))) continue;
           if (gids.some(gid =>  wouldBreakGapRule(cohortClassOcc, gid, tDay, newKeys))) continue;
 
           // Prefer the session's original room; fall back to any free room
@@ -1117,7 +1124,7 @@ export async function runAutoScheduler(
               const newKeys = slotKeys(tDay, startTime, endTime);
               if (entry.facultyId && !isFree(facultyOcc, entry.facultyId, newKeys)) continue;
               if (gids.some(g => !isFree(cohortOcc, g, newKeys))) continue;
-              if (rules.lunch.length > 0 && gids.some(g => !leavesLunchFree(cohortOcc, g, tDay, rules.lunch, newKeys))) continue;
+              if (rules.lunch.length > 0 && gids.some(g => !leavesLunchFree(lunchOcc, g, tDay, rules.lunch, newKeys))) continue;
               if (gids.some(g => wouldBreakGapRule(cohortClassOcc, g, tDay, newKeys))) continue;
               // Same room only, so room type and campus stay right.
               if (entry.roomId && !isFree(roomOcc, entry.roomId, newKeys)) continue;

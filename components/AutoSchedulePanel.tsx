@@ -61,6 +61,7 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
     'Faculty Clash Slots', 'Cohort Clash Slots', 'Consecutive Hr Rejections',
     'Fixed Room Rejections', 'Placed Without Room', 'Total Candidate Slots',
     'Suggestion 1', 'Suggestion 2', 'Suggestion 3',
+    'Slots tried and why they were refused',
   ];
   const rows = unresolved.map(u => {
     const d = u.diagnostics;
@@ -74,6 +75,7 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
       d?.rejectedByConsecutiveHours ?? '', d?.rejectedByFixedRoom ?? '',
       d?.rejectedByNoRoom ?? '', d?.totalCandidates ?? '',
       d?.suggestions[0] ?? '', d?.suggestions[1] ?? '', d?.suggestions[2] ?? '',
+      (d?.slotDetails ?? []).map(g => `${g.reason} (${g.slots.length}): ${g.slots.join(', ')}`).join('\n'),
     ];
   });
 
@@ -85,6 +87,7 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
     { wch: 16 }, { wch: 16 }, { wch: 20 },
     { wch: 18 }, { wch: 18 }, { wch: 16 },
     { wch: 65 }, { wch: 65 }, { wch: 65 },
+    { wch: 120 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Conflict Report');
@@ -305,18 +308,40 @@ const AutoSchedulePanel: React.FC<Props> = ({
     return n;
   };
 
+  // Each run tries slots in a different random order, so results vary. Run
+  // several attempts and keep the one with the fewest unplaced sessions
+  // (then the fewest sessions without a room).
+  const [attempts, setAttempts] = useState<number>(5);
+  const [attemptSummary, setAttemptSummary] = useState('');
+  const unplacedOf = (r: SchedulerResult) =>
+    r.unresolved.reduce((s, u) => s + Math.max(0, u.sessionsNeeded - u.sessionsPlaced), 0);
   const handleGenerate = async () => {
     if (!assignments.length) return;
     setResultTermId(activeTermId);
-    setStage('running'); setProgress(0); setLabel('Starting…'); setResult(null);
+    setStage('running'); setProgress(0); setLabel('Starting…'); setResult(null); setAttemptSummary('');
     const balanced = applyDefaultDays(assignments, defDays);
-    const res = await runAutoScheduler(
-      balanced, roomCampusMap, courses, faculties, rooms, groups,
-      activeTermId || '', getTermWeeks(activeTerm),
-      (placed, total, lbl) => { setProgress(total > 0 ? Math.round((placed / total) * 100) : 0); setLabel(lbl); },
-      schedule,
-    );
-    setResult(res); setStage('done'); setProgress(100); setLabel('Complete');
+    let best: SchedulerResult | null = null;
+    const scores: number[] = [];
+    for (let i = 0; i < attempts; i++) {
+      const res = await runAutoScheduler(
+        balanced, roomCampusMap, courses, faculties, rooms, groups,
+        activeTermId || '', getTermWeeks(activeTerm),
+        (placed, total, lbl) => {
+          const within = total > 0 ? placed / total : 0;
+          setProgress(Math.round(((i + within) / attempts) * 100));
+          setLabel(`Attempt ${i + 1} of ${attempts}${best ? ` · best so far: ${unplacedOf(best)} unplaced` : ''} · ${lbl}`);
+        },
+        schedule,
+      );
+      scores.push(unplacedOf(res));
+      if (!best || unplacedOf(res) < unplacedOf(best)
+        || (unplacedOf(res) === unplacedOf(best) && res.roomless.length < best.roomless.length)) best = res;
+      if (unplacedOf(best) === 0 && best.roomless.length === 0) break; // can't do better
+    }
+    setResult(best); setStage('done'); setProgress(100); setLabel('Complete');
+    setAttemptSummary(scores.length > 1
+      ? `Best of ${scores.length} attempts — unplaced ranged ${Math.min(...scores)}–${Math.max(...scores)}; kept the best (${Math.min(...scores)}).`
+      : '');
   };
 
   const handleApply = async () => {
@@ -545,6 +570,13 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
           {/* Generate — pinned to bottom of left column */}
           <div className="mt-auto shrink-0">
+            <div className="flex items-center gap-2 mb-1.5 px-0.5" title="More attempts take longer but usually leave fewer conflicts">
+              <span className="text-[9px] font-black text-[#334155] uppercase tracking-widest">Attempts</span>
+              {[1, 5, 10, 20].map(n => (
+                <Chip key={n} active={attempts === n} onClick={() => setAttempts(n)}>{n}</Chip>
+              ))}
+              <span className="text-[9px] text-[#94a3b8]">keeps the best</span>
+            </div>
             <button
               onClick={handleGenerate}
               disabled={!isReady}
@@ -607,6 +639,9 @@ const AutoSchedulePanel: React.FC<Props> = ({
                         style={{ width: `${pct}%`, background: pct === 100 ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#4338ca,#7c3aed,#0891b2)' }} />
                     </div>
                     <p className="text-[9px] text-[#64748b] truncate">{label}</p>
+                    {attemptSummary && stage === 'done' && (
+                      <p className="text-[9px] font-bold text-[#059669] mt-0.5">{attemptSummary}</p>
+                    )}
                   </div>
 
                   {/* Stat cards */}
@@ -706,6 +741,19 @@ const AutoSchedulePanel: React.FC<Props> = ({
                                         <span className="block text-[8px] text-[#b45309] mt-0.5">
                                           {d.totalCandidates} candidates checked
                                         </span>
+                                      )}
+                                      {d?.slotDetails && d.slotDetails.length > 0 && (
+                                        <details className="mt-1">
+                                          <summary className="text-[8px] font-black text-[#4338ca] cursor-pointer select-none">Which slots?</summary>
+                                          <div className="mt-1 space-y-1">
+                                            {d.slotDetails.map(g => (
+                                              <div key={g.reason} className="text-[8px] leading-snug">
+                                                <span className="font-black text-[#92400e]">{g.reason} ({g.slots.length}):</span>{' '}
+                                                <span className="text-[#475569]">{g.slots.join(', ')}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </details>
                                       )}
                                     </td>
                                     <td className="px-2 py-1.5 text-[#64748b] max-w-[180px]">

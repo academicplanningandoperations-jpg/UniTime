@@ -67,6 +67,9 @@ export interface ConflictDiagnostics {
   rejectedByFixedRoom: number;
   rejectedByNoRoom: number;   // rejected because no valid room was available
   suggestions: string[];
+  // Every slot that was tried, grouped by why it was turned down, e.g.
+  // { reason: 'Faculty busy', slots: ['Mon 10:00–11:00 (CSEG2072_5)', …] }
+  slotDetails?: { reason: string; slots: string[] }[];
 }
 
 export interface UnresolvedSession {
@@ -748,6 +751,36 @@ export async function runAutoScheduler(
     return b.cohorts.length - a.cohorts.length;
   });
 
+  // Turn the list of refused slots into readable groups, naming the class
+  // that was already there ("Mon 10:00–11:00 (CSEG2072_5)") where there is one.
+  const courseLabel = new Map(existingCourses.map(c => [c.id, c.code || c.name] as [string, string]));
+  const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+  const describeTurnedDown = (
+    list: { why: string; day: string; startTime: string; endTime: string }[],
+    facultyId: string | null, cohortIds: string[],
+  ): { reason: string; slots: string[] }[] => {
+    if (list.length === 0) return [];
+    // Only this faculty's and these cohorts' sessions — looked up once per course.
+    const all = [...entries, ...existingSchedule.filter(e => e.termId === termId)];
+    const facultySessions = facultyId ? all.filter(e => e.facultyId === facultyId) : [];
+    const cohortSessions = all.filter(e => (e.groupIds ?? []).some(g => cohortIds.includes(g)));
+    const clashWith = (why: string, day: string, st: string, et: string): string => {
+      const s = toMin(st), en = toMin(et);
+      const overlaps = (e: ScheduleEntry) => e.day === day && toMin(e.startTime) < en && toMin(e.endTime) > s;
+      let hit: ScheduleEntry | undefined;
+      if (why === 'Faculty busy') hit = facultySessions.find(overlaps);
+      else if (why === 'Cohort busy') hit = cohortSessions.find(overlaps);
+      else return '';
+      return hit ? ` (${courseLabel.get(hit.courseId ?? '') ?? 'another class'})` : ' (blocked time)';
+    };
+    const groupsOut = new Map<string, string[]>();
+    for (const t of list) {
+      const text = `${t.day.slice(0, 3)} ${t.startTime}–${t.endTime}${clashWith(t.why, t.day, t.startTime, t.endTime)}`;
+      groupsOut.set(t.why, [...(groupsOut.get(t.why) ?? []), text]);
+    }
+    return Array.from(groupsOut, ([reason, slots]) => ({ reason, slots }));
+  };
+
   for (let ai = 0; ai < sorted.length; ai++) {
     const asgn = sorted[ai];
     // "PE1 Lab" behaves as a Lab (duration, room type) that belongs to basket PE1.
@@ -996,22 +1029,29 @@ export async function runAutoScheduler(
     // Pass 1: require a room. Slots with no room free are saved as fallbacks
     // instead of being accepted immediately, so a later slot with a free room
     // is preferred over giving up at the first room-less candidate.
-    for (const { day, startTime, endTime } of candidates) {
+    // Why each tried slot was turned down — shown in the conflict report.
+    const turnedDown: { why: string; day: string; startTime: string; endTime: string }[] = [];
+    let cur = candidates[0];
+    const no = (why: string) => { turnedDown.push({ why, day: cur.day, startTime: cur.startTime, endTime: cur.endTime }); };
+    for (const cand of candidates) {
+      cur = cand;
+      const { day, startTime, endTime } = cand;
       if (placed >= sessionsNeeded) break;
-      if (takenDays.has(day)) continue;
+      if (takenDays.has(day)) { no('Course already on this day'); continue; }
 
       const keys = slotKeys(day, startTime, endTime);
 
-      if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
-      if (groups.some(g => !cohortFree(g.id, keys))) { rejCohort++; continue; }
-      if (effLunch.length > 0 && groups.some(g => !leavesLunchFree(lunchOcc, g.id, day, effLunch, keys))) { rejCohort++; continue; }
-      if (groups.some(g => wouldBreakGapRule(cohortClassOcc, g.id, day, keys))) { rejCohort++; continue; }
-      if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; continue; }
+      if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; no('Faculty busy'); continue; }
+      if (groups.some(g => !cohortFree(g.id, keys))) { rejCohort++; no('Cohort busy'); continue; }
+      if (effLunch.length > 0 && groups.some(g => !leavesLunchFree(lunchOcc, g.id, day, effLunch, keys))) { rejCohort++; no('Would take the lunch hour'); continue; }
+      if (groups.some(g => wouldBreakGapRule(cohortClassOcc, g.id, day, keys))) { rejCohort++; no('Would leave a gap over 2 hours'); continue; }
+      if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; no('Faculty would teach 3 hours in a row'); continue; }
 
       const pickedRoom = pickRoomFor(keys);
       if (!pickedRoom) {
-        if (asgn.fixedRoom) { rejFixedRoom++; continue; } // fixed room taken — try next slot
+        if (asgn.fixedRoom) { rejFixedRoom++; no('Fixed room taken'); continue; } // fixed room taken — try next slot
         rejNoRoom++;
+        no('No free room');
         continue; // try a different slot since room is busy
       }
 
@@ -1024,6 +1064,7 @@ export async function runAutoScheduler(
         rejFaculty, rejCohort, rejConsec, rejFixedRoom, rejNoRoom,
         placed, sessionsNeeded,
       );
+      diag.slotDetails = describeTurnedDown(turnedDown, faculty?.id ?? null, groupIds);
       unresolved.push({
         courseCode:     asgn.courseCode,
         courseName:     asgn.courseName,

@@ -741,21 +741,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                                         <span className="block text-[8px] text-[#b45309] mt-0.5">
                                           {d.totalCandidates} candidates checked
                                         </span>
-                                      )}
-                                      {d?.slotDetails && d.slotDetails.length > 0 && (
-                                        <details className="mt-1">
-                                          <summary className="text-[8px] font-black text-[#4338ca] cursor-pointer select-none">Which slots?</summary>
-                                          <div className="mt-1 space-y-1">
-                                            {d.slotDetails.map(g => (
-                                              <div key={g.reason} className="text-[8px] leading-snug">
-                                                <span className="font-black text-[#92400e]">{g.reason} ({g.slots.length}):</span>{' '}
-                                                <span className="text-[#475569]">{g.slots.join(', ')}</span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </details>
-                                      )}
-                                    </td>
+                                      )}                                    </td>
                                     <td className="px-2 py-1.5 text-[#64748b] max-w-[180px]">
                                       <span className="block leading-tight text-[8px]">
                                         {d?.suggestions[0] ?? '—'}

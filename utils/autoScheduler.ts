@@ -720,26 +720,45 @@ export async function runAutoScheduler(
   const siblingsOf = (gid: string): string[] => (pairMembers.get(pairRoot(gid)) ?? []).filter(x => x !== gid);
 
   // ── Planned class days ────────────────────────────────────────────────────
-  // Each group of paired cohorts gets its class days decided up front: all of
-  // its week when it has enough classes, otherwise only as many days as give
-  // each MIN_DAY_CLASSES — dropping the days fewest of its rows' faculty can
-  // teach on. Sessions then go to the planned day with the fewest classes so
-  // far, which fills every planned day evenly and avoids one-class days.
+  // Each group of paired cohorts gets its class days decided up front: up to
+  // TARGET_DAYS (5) days — so a Mon–Sat cohort is planned without Saturday
+  // (or Monday) — or fewer if it has too few classes to give each day
+  // MIN_DAY_CLASSES. The left-out day is only used as a fallback when a class
+  // fits nowhere else. Sessions go to the planned day with the fewest classes
+  // so far, which fills every planned day evenly and avoids one-class days.
+  const TARGET_DAYS = 5;
   const plannedDays = new Map<string, Set<string>>();
   pairMembers.forEach(members => {
     const week = new Set<string>();
     members.forEach(g => cohortWeek.get(g)?.forEach(d => week.add(d)));
     const need = Math.max(...members.map(g => requiredDays.get(g) ?? 0), 0);
     const avail = new Map<string, number>();
+    // Classes that can't fit without a given day: a course meets at most once
+    // a day, so a row needs as many of its teacher's working days as it has
+    // classes. E.g. a 5-class course taught by a Tue–Sat teacher needs
+    // Saturday if Saturday is left out — then Monday should be the free day.
+    const forced = new Map<string, number>();
     for (const a of courseRows) {
       const gs = a.cohorts.map(findGroup).filter(Boolean) as StudentGroup[];
       if (!gs.some(g => members.includes(g.id))) continue;
       const rowDays = parseDays(a.workingDays).length ? parseDays(a.workingDays) : DAYS_MAP['Mon-Fri'];
       rowDays.forEach(d => avail.set(d, (avail.get(d) ?? 0) + rowHours(a)));
+      for (const d of EDGE_FREE_DAYS) {
+        const without = rowDays.filter(x => x !== d && week.has(x)).length;
+        forced.set(d, (forced.get(d) ?? 0) + Math.max(0, rowSessions(a) - without));
+      }
     }
-    // Middle days first, then Monday, then Saturday; most-available first within each.
-    const order = Array.from(week).sort((x, y) => (dayRank(y) - dayRank(x)) || ((avail.get(y) ?? 0) - (avail.get(x) ?? 0)));
-    const days = new Set(order.slice(0, Math.max(1, need)));
+    // Days to leave out first: the Saturday/Monday that the fewest classes need
+    // (Saturday on a tie), then the other edge day, then the least-available
+    // middle days — only small cohorts drop more than one day.
+    const edgeOrder = EDGE_FREE_DAYS.filter(d => week.has(d))
+      .sort((x, y) => ((forced.get(x) ?? 0) - (forced.get(y) ?? 0)) || (dayRank(x) - dayRank(y)));
+    const middleOrder = Array.from(week).filter(d => !EDGE_FREE_DAYS.includes(d))
+      .sort((x, y) => (avail.get(x) ?? 0) - (avail.get(y) ?? 0));
+    const dropOrder = [...edgeOrder, ...middleOrder];
+    const keep = Math.max(1, Math.min(need, TARGET_DAYS, week.size));
+    const dropped = new Set(dropOrder.slice(0, week.size - keep));
+    const days = new Set(Array.from(week).filter(d => !dropped.has(d)));
     members.forEach(g => plannedDays.set(g, new Set(Array.from(days).filter(d => cohortWeek.get(g)?.has(d)))));
   });
   // What each placed session was allowed to do, so the repair pass at the end
@@ -1216,6 +1235,27 @@ export async function runAutoScheduler(
       }
     }
 
+    // (a2) Fit the week into the planned days: when the day left out of the
+    //      plan (Saturday or Monday) picked up classes during placement, try
+    //      to move all of them into free slots on the cohort's other days.
+    for (const [gid, week] of cohortWeek) {
+      const plan = plannedDays.get(gid);
+      if (!plan) continue;
+      for (const d of EDGE_FREE_DAYS) {
+        if (!week.has(d) || plan.has(d) || dayClasses(gid, d) === 0) continue;
+        if (!mayBeFree(gid, d)) continue;
+        const here = entries.filter(e => movable(e) && e.day === d && (e.groupIds ?? []).includes(gid));
+        for (const e of here) {
+          const targets = Array.from(plan).filter(t => t !== d && dayClasses(gid, t) > 0)
+            .sort((x, y) => dayClasses(gid, x) - dayClasses(gid, y)); // lightest day first
+          for (const tDay of targets) {
+            if (!(e.groupIds ?? []).every(g => g === gid || (leavesDayOk(g, d) && joinsDayOk(g, tDay)))) continue;
+            if (moveEntry(e, tDay)) { progress = true; break; }
+          }
+        }
+      }
+    }
+
     // (b) One-class days. On Saturday/Monday, first move the class to a free
     //     slot on another class day so the whole day is free; otherwise (and
     //     on middle days) bring a second class to it from a fuller day.
@@ -1254,6 +1294,33 @@ export async function runAutoScheduler(
         }
       }
     }
+    // (c) Saturday/Monday used after all (the week didn't fit in 5 days):
+    //     share the load — move classes from the busiest days onto it until
+    //     it is about level with them, never leaving a day under the minimum.
+    for (const [gid, week] of cohortWeek) {
+      for (const d of EDGE_FREE_DAYS) {
+        if (!week.has(d) || dayClasses(gid, d) === 0) continue;
+        for (let guard = 0; guard < 6; guard++) {
+          const used = Array.from(week).filter(x => dayClasses(gid, x) > 0);
+          const avg = used.reduce((sum, x) => sum + dayClasses(gid, x), 0) / used.length;
+          if (dayClasses(gid, d) >= Math.floor(avg)) break;
+          const heavy = Array.from(week)
+            .filter(x => x !== d && dayClasses(gid, x) > Math.ceil(avg))
+            .sort((x, y) => dayClasses(gid, y) - dayClasses(gid, x));
+          let moved = false;
+          for (const hd of heavy) {
+            const cands = entries
+              .filter(e => movable(e) && e.day === hd && (e.groupIds ?? []).includes(gid))
+              .filter(e => (e.groupIds ?? []).every(g => leavesDayOk(g, hd) && (g === gid || joinsDayOk(g, d))));
+            for (const e of cands) if (moveEntry(e, d)) { moved = true; break; }
+            if (moved) break;
+          }
+          if (!moved) break;
+          progress = true;
+        }
+      }
+    }
+
     if (!progress) break;
   }
 

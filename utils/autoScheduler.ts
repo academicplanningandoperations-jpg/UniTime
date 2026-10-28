@@ -105,6 +105,56 @@ export interface SchedulerResult {
   unresolved: UnresolvedSession[];
   roomless: RoomlessSession[];
   stats: { totalSessions: number; placed: number; unresolvedCount: number };
+  // Filled only when asked for (options.exportProblem): everything the
+  // separate solver program needs, worked out with exactly these rules.
+  problem?: SolverProblem;
+}
+
+// --- Solver hand-off ---------------------------------------------------------
+// The solver (solver/unitime_solver.py, run on this PC) gets the same allowed
+// slots, rooms and blocked hours this scheduler uses, so both follow one set of
+// rules. Hour keys look like "Monday~08:00", as in the occupancy maps below.
+export interface SolverRow {
+  sessions: number;            // classes this row needs per week
+  dayKey: string;              // rows sharing this key meet at most once a day
+  facultyId: string | null;
+  groupIds: string[];
+  elective: string | null;     // elective basket key - same basket may share a slot
+  isLab: boolean;
+  lunch: number[];             // at least one of these hours stays free for lunch
+  // Allowed slots: [day, startTime, endTime, hours it occupies]
+  cands: [string, string, string, number[]][];
+  rooms: string[];             // rooms to use (in order of preference)
+  rooms2: string[];            // fallback rooms (any campus room) when rooms is all busy
+  // Used to turn the solver's answer back into sessions.
+  courseId: string | null;
+  category: string;
+  school: string;
+  asgn: CourseAssignment;
+}
+export interface SolverProblem {
+  version: number;
+  days: string[];
+  rows: SolverRow[];
+  facultyBusy: Record<string, string[]>;
+  facultyNonLabBusy: Record<string, string[]>;
+  cohortBusy: Record<string, string[]>;      // classes, Explo and cohort blocks
+  cohortClass: Record<string, string[]>;     // existing classes only (gap rule)
+  cohortExplo: Record<string, string[]>;     // Explo hours (lunch rule)
+  electiveSlot: Record<string, string>;      // "cohortId|key" -> basket ('#' = ordinary)
+  roomBusy: Record<string, string[]>;
+  existingDayClasses: Record<string, number>; // "cohortId~Monday" -> classes already there
+  cohortWeek: Record<string, string[]>;
+  requiredDays: Record<string, number>;
+  edgeFreeDays: string[];
+  minDayClasses: number;
+  maxGapHours: number;
+  // The best timetable this scheduler found: [row, day, startTime, roomId]
+  hint: [number, string, string, string][];
+  // Rows that never reach the solver (faculty not found, window too narrow)
+  // keep the reasons this scheduler gave them.
+  preUnresolved: UnresolvedSession[];
+  totalSessions: number;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -432,6 +482,7 @@ export async function runAutoScheduler(
   weeks: number[],
   onProgress: (placed: number, total: number, label: string) => void,
   existingSchedule: ScheduleEntry[] = [],   // pre-existing sessions to respect
+  options: { exportProblem?: boolean } = {},
 ): Promise<SchedulerResult> {
 
   const entries: ScheduleEntry[] = [];
@@ -832,6 +883,31 @@ export async function runAutoScheduler(
     return Array.from(groupsOut, ([reason, slots]) => ({ reason, slots }));
   };
 
+  // Solver hand-off: blocked/busy hours as they are before this run places anything.
+  const mapOut = (m: Map<string, Set<string>>) => Object.fromEntries(Array.from(m, ([k, v]) => [k, Array.from(v)]));
+  const problem: SolverProblem | null = options.exportProblem ? {
+    version: 1,
+    days: ALL_DAYS,
+    rows: [],
+    facultyBusy: mapOut(facultyOcc),
+    facultyNonLabBusy: mapOut(facultyNonLabOcc),
+    cohortBusy: mapOut(cohortOcc),
+    cohortClass: mapOut(cohortClassOcc),
+    cohortExplo: mapOut(cohortExploOcc),
+    electiveSlot: Object.fromEntries(electiveSlot),
+    roomBusy: mapOut(roomOcc),
+    existingDayClasses: Object.fromEntries(cohortDaySessionCount),
+    cohortWeek: Object.fromEntries(Array.from(cohortWeek, ([k, v]) => [k, Array.from(v)])),
+    requiredDays: Object.fromEntries(requiredDays),
+    edgeFreeDays: EDGE_FREE_DAYS,
+    minDayClasses: MIN_DAY_CLASSES,
+    maxGapHours: MAX_GAP_HOURS,
+    hint: [],
+    preUnresolved: [],
+    totalSessions,
+  } : null;
+  const entryRow = new Map<ScheduleEntry, number>();
+
   for (let ai = 0; ai < sorted.length; ai++) {
     const asgn = sorted[ai];
     // "PE1 Lab" behaves as a Lab (duration, room type) that belongs to basket PE1.
@@ -1002,19 +1078,18 @@ export async function runAutoScheduler(
     // room available AT THAT SPECIFIC slot. Saved instead of committed immediately,
     // so the scheduler keeps trying other day/time slots first — a room might be
     // free at a different time even if it's busy at this one.
-    const pickRoomFor = (keys: string[]): Room | undefined => {
+    // Rooms this row may use: [first choice, fallback]. Worked out once per row.
+    const roomTiers = ((): [Room[], Room[]] => {
       if (asgn.fixedRoom) {
         const r = findRoom(asgn.fixedRoom);
-        return r && isFree(roomOcc, r.id, keys) ? r : undefined;
+        return [r ? [r] : [], []];
       }
 
       // When preferred rooms are specified, ONLY choose from those rooms.
       // Do NOT fall back to arbitrary campus rooms — the user explicitly
       // listed which rooms this course may use.
       const preferredObjs = asgn.preferredRooms.map(name => findRoom(name)).filter(Boolean) as Room[];
-      if (preferredObjs.length > 0) {
-        return preferredObjs.find(r => isFree(roomOcc, r.id, keys));
-      }
+      if (preferredObjs.length > 0) return [preferredObjs, []];
 
       // No preferred rooms specified — search all campus rooms by type
       const campusRooms = existingRooms.filter(r => {
@@ -1032,8 +1107,32 @@ export async function runAutoScheduler(
         if (cat === 'studio') return t.includes('studio');
         return !t.includes('lab') && !t.includes('studio') && !t.includes('audit');
       });
-      return typeMatched.find(r => isFree(roomOcc, r.id, keys)) ?? campusRooms.find(r => isFree(roomOcc, r.id, keys));
-    };
+      return [typeMatched, campusRooms];
+    })();
+    const pickRoomFor = (keys: string[]): Room | undefined =>
+      roomTiers[0].find(r => isFree(roomOcc, r.id, keys)) ?? roomTiers[1].find(r => isFree(roomOcc, r.id, keys));
+
+    const rowIndex = problem ? problem.rows.length : -1;
+    if (problem) {
+      const first = new Set(roomTiers[0].map(r => r.id));
+      problem.rows.push({
+        sessions: sessionsNeeded,
+        dayKey,
+        facultyId: faculty?.id ?? null,
+        groupIds,
+        elective: elective?.key ?? null,
+        isLab,
+        lunch: effLunch,
+        cands: rawCandidates.map(c => [c.day, c.startTime, c.endTime,
+          slotKeys(c.day, c.startTime, c.endTime).map(k => parseInt(k.slice(k.indexOf('~') + 1)))]),
+        rooms: roomTiers[0].map(r => r.id),
+        rooms2: roomTiers[1].map(r => r.id).filter(id => !first.has(id)),
+        courseId: course?.id ?? null,
+        category: asgn.category,
+        school: schoolOf(asgn),
+        asgn,
+      });
+    }
 
     const commitPlacement = (day: string, startTime: string, endTime: string, pickedRoom: Room) => {
       const keys = slotKeys(day, startTime, endTime);
@@ -1071,6 +1170,7 @@ export async function runAutoScheduler(
         school:       schoolOf(asgn),
       } as ScheduleEntry;
       entries.push(entry);
+      if (problem) entryRow.set(entry, rowIndex);
       if (cohortWin) entryWindow.set(entry, { start: winStart, end: winEnd });
       entryRules.set(entry, { days: candidateDays, hours: allowedHours, isLab, lunch: effLunch, pickRoom: pickRoomFor });
 
@@ -1333,6 +1433,12 @@ export async function runAutoScheduler(
     if (!progress) break;
   }
 
+  if (problem) {
+    problem.hint = entries.filter(e => entryRow.has(e))
+      .map(e => [entryRow.get(e)!, e.day as string, e.startTime, e.roomId ?? ''] as [number, string, string, string]);
+    problem.preUnresolved = unresolved.filter(u => u.facultyNotFound || u.windowTooNarrow);
+  }
+
   return {
     entries,
     unresolved,
@@ -1342,6 +1448,7 @@ export async function runAutoScheduler(
       placed: entries.length,
       unresolvedCount: totalSessions - entries.length,
     },
+    ...(problem ? { problem } : {}),
   };
 }
 

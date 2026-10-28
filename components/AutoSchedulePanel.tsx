@@ -14,6 +14,7 @@ import {
   parseClockHour,
 } from '../utils/autoScheduler';
 import { areParallelElectives } from '../utils/electives';
+import { checkSolver, runSolver, resultFromSolver, solverOutdated, type SolverStatus } from '../utils/solverClient';
 
 interface Props {
   courses: Course[];
@@ -327,33 +328,104 @@ const AutoSchedulePanel: React.FC<Props> = ({
     return n;
   };
   const scoreOf = (r: SchedulerResult) => 3 * unplacedOf(r) + oneClassDaysOf(r);
-  const handleGenerate = async () => {
-    if (!assignments.length) return;
-    setResultTermId(activeTermId);
-    setStage('running'); setProgress(0); setLabel('Starting…'); setResult(null); setAttemptSummary('');
-    const balanced = applyDefaultDays(assignments, defDays);
+
+  // Method: Standard (this screen, as before) or Solver (the UniTime Solver
+  // program on this PC). The choice is remembered on this computer.
+  const [method, setMethodState] = useState<'standard' | 'solver'>(() => {
+    try { return localStorage.getItem('unitime_schedule_method') === 'solver' ? 'solver' : 'standard'; } catch { return 'standard'; }
+  });
+  const setMethod = (m: 'standard' | 'solver') => {
+    setMethodState(m);
+    try { localStorage.setItem('unitime_schedule_method', m); } catch { /* not saved */ }
+  };
+  const [solverStatus, setSolverStatus] = useState<SolverStatus | null>(null);
+  const [solverMinutes, setSolverMinutes] = useState<number>(5);
+  useEffect(() => {
+    if (method !== 'solver' || stage === 'running') return;
+    let alive = true;
+    const look = () => checkSolver().then(st => { if (alive) setSolverStatus(st); });
+    look();
+    const t = setInterval(look, 10000);
+    return () => { alive = false; clearInterval(t); };
+  }, [method, stage]);
+
+  // Standard method: several attempts, keep the best. `share` is the part of
+  // the progress bar it fills (all of it, or the first part before the solver).
+  const runStandard = async (balanced: CourseAssignment[], n: number, share: number, exportProblem: boolean) => {
     let best: SchedulerResult | null = null;
     const scores: number[] = [];
-    for (let i = 0; i < attempts; i++) {
+    for (let i = 0; i < n; i++) {
       const res = await runAutoScheduler(
         balanced, roomCampusMap, courses, faculties, rooms, groups,
         activeTermId || '', getTermWeeks(activeTerm),
         (placed, total, lbl) => {
           const within = total > 0 ? placed / total : 0;
-          setProgress(Math.round(((i + within) / attempts) * 100));
-          setLabel(`Attempt ${i + 1} of ${attempts}${best ? ` · best so far: ${unplacedOf(best)} unplaced` : ''} · ${lbl}`);
+          setProgress(Math.round(((i + within) / n) * 100 * share));
+          setLabel(`${exportProblem ? 'Step 1 of 2 · Standard method for a starting point · ' : ''}Attempt ${i + 1} of ${n}${best ? ` · best so far: ${unplacedOf(best)} unplaced` : ''} · ${lbl}`);
         },
         schedule,
+        { exportProblem },
       );
       scores.push(unplacedOf(res));
       if (!best || scoreOf(res) < scoreOf(best)
         || (scoreOf(res) === scoreOf(best) && res.roomless.length < best.roomless.length)) best = res;
       if (scoreOf(best) === 0 && best.roomless.length === 0) break; // can't do better
     }
-    setResult(best); setStage('done'); setProgress(100); setLabel('Complete');
-    setAttemptSummary(scores.length > 1 && best
-      ? `Best of ${scores.length} attempts — unplaced ranged ${Math.min(...scores)}–${Math.max(...scores)}; kept the one with ${unplacedOf(best)} unplaced and ${oneClassDaysOf(best)} one-class days.`
-      : '');
+    return { best: best!, scores };
+  };
+
+  const handleGenerate = async () => {
+    if (!assignments.length) return;
+    let useSolver = method === 'solver';
+    if (useSolver) {
+      const st = await checkSolver();
+      setSolverStatus(st);
+      if (!st || st.busy) {
+        const msg = !st
+          ? 'The UniTime Solver is not running on this computer.\n\nStart it (double-click "Start UniTime Solver"), then click Generate again.'
+          : 'The UniTime Solver is busy with another timetable. Wait for it to finish, then click Generate again.';
+        if (!confirm(`${msg}\n\nOr click OK to use the Standard method now.`)) return;
+        useSolver = false;
+      }
+    }
+    setResultTermId(activeTermId);
+    setStage('running'); setProgress(0); setLabel('Starting…'); setResult(null); setAttemptSummary('');
+    const balanced = applyDefaultDays(assignments, defDays);
+
+    if (!useSolver) {
+      const { best, scores } = await runStandard(balanced, attempts, 1, false);
+      setResult(best); setStage('done'); setProgress(100); setLabel('Complete');
+      setAttemptSummary(scores.length > 1 && best
+        ? `Best of ${scores.length} attempts — unplaced ranged ${Math.min(...scores)}–${Math.max(...scores)}; kept the one with ${unplacedOf(best)} unplaced and ${oneClassDaysOf(best)} one-class days.`
+        : '');
+      return;
+    }
+
+    // Solver: the Standard method first gives a starting point (and is kept if
+    // the solver can't do better), then the solver searches all classes at once.
+    const { best: standard } = await runStandard(balanced, 3, 0.1, true);
+    const problem = standard.problem!;
+    let final = standard;
+    let summary = '';
+    try {
+      const ans = await runSolver(problem, solverMinutes * 60, (text, fr) => {
+        setLabel(`Step 2 of 2 · ${text}`);
+        setProgress(Math.round(10 + fr * 90));
+      });
+      const solved = resultFromSolver(problem, ans, activeTermId || '', getTermWeeks(activeTerm));
+      if (unplacedOf(solved) <= unplacedOf(standard)) {
+        final = solved;
+        summary = `Solver: placed ${ans.stats.placed} of ${ans.stats.needed} sessions in ${ans.stats.seconds}s ` +
+          `(Standard method: ${ans.stats.standardPlaced}). ${unplacedOf(solved)} unplaced, ${oneClassDaysOf(solved)} one-class days.` +
+          (ans.stats.proven ? ' The solver proved no timetable can place more under these rules.' : '');
+      } else {
+        summary = `The solver did not beat the Standard method this time, so the Standard result is shown (${unplacedOf(standard)} unplaced).`;
+      }
+    } catch (err: any) {
+      summary = `Solver failed (${err?.message || 'no answer'}) — showing the Standard method's result instead.`;
+    }
+    setResult(final); setStage('done'); setProgress(100); setLabel('Complete');
+    setAttemptSummary(summary);
   };
 
   const handleApply = async () => {
@@ -386,7 +458,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
     alert(`✅ ${result.entries.length} sessions applied. Switch to Timetable Builder to view them.`);
   };
 
-  const Chip = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) => (
+  const Chip: React.FC<{ active: boolean; onClick: () => void; children: React.ReactNode }> = ({ active, onClick, children }) => (
     <button type="button" onClick={onClick}
       className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wide border transition-all ${active ? 'text-white border-transparent shadow-sm' : 'bg-white text-[#64748b] border-[#e2e8f0] hover:border-[#94a3b8]'}`}
       style={active ? { background: STEP_GRADS[2] } : {}}>
@@ -582,13 +654,35 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
           {/* Generate — pinned to bottom of left column */}
           <div className="mt-auto shrink-0">
-            <div className="flex items-center gap-2 mb-1.5 px-0.5" title="More attempts take longer but usually leave fewer conflicts">
-              <span className="text-[9px] font-black text-[#334155] uppercase tracking-widest">Attempts</span>
-              {[1, 5, 10, 20].map(n => (
-                <Chip key={n} active={attempts === n} onClick={() => setAttempts(n)}>{n}</Chip>
-              ))}
-              <span className="text-[9px] text-[#94a3b8]">keeps the best</span>
+            <div className="flex items-center gap-2 mb-1.5 px-0.5 flex-wrap" title="Standard runs here in the browser. Solver uses the UniTime Solver program on this PC and usually places many more classes.">
+              <span className="text-[9px] font-black text-[#334155] uppercase tracking-widest">Method</span>
+              <Chip active={method === 'standard'} onClick={() => setMethod('standard')}>Standard</Chip>
+              <Chip active={method === 'solver'} onClick={() => setMethod('solver')}>Solver</Chip>
+              {method === 'solver' && (
+                <span className={`flex items-center gap-1 text-[9px] font-bold ${solverStatus ? (solverOutdated(solverStatus) ? 'text-[#d97706]' : 'text-[#059669]') : 'text-[#94a3b8]'}`}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: solverStatus ? (solverOutdated(solverStatus) ? '#d97706' : '#059669') : '#cbd5e1' }} />
+                  {solverStatus
+                    ? (solverOutdated(solverStatus) ? `outdated (v${solverStatus.version}) — please update` : `running · v${solverStatus.version}`)
+                    : 'not running on this PC'}
+                </span>
+              )}
             </div>
+            {method === 'standard' ? (
+              <div className="flex items-center gap-2 mb-1.5 px-0.5" title="More attempts take longer but usually leave fewer conflicts">
+                <span className="text-[9px] font-black text-[#334155] uppercase tracking-widest">Attempts</span>
+                {[1, 5, 10, 20].map(n => (
+                  <Chip key={n} active={attempts === n} onClick={() => setAttempts(n)}>{n}</Chip>
+                ))}
+                <span className="text-[9px] text-[#94a3b8]">keeps the best</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-1.5 px-0.5" title="More time usually places more classes and gives better days">
+                <span className="text-[9px] font-black text-[#334155] uppercase tracking-widest">Time limit</span>
+                {[2, 5, 10].map(n => (
+                  <Chip key={n} active={solverMinutes === n} onClick={() => setSolverMinutes(n)}>{n} min</Chip>
+                ))}
+              </div>
+            )}
             <button
               onClick={handleGenerate}
               disabled={!isReady}

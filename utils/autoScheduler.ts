@@ -435,6 +435,14 @@ export async function runAutoScheduler(
 ): Promise<SchedulerResult> {
 
   const entries: ScheduleEntry[] = [];
+  // A row with a blank School takes the school its cohorts have on other rows.
+  const sheetCohortSchool = new Map<string, string>();
+  for (const a of assignments) {
+    const s = (a.school || '').trim();
+    if (s) a.cohorts.forEach(c => { if (!sheetCohortSchool.has(c)) sheetCohortSchool.set(c, s); });
+  }
+  const schoolOf = (a: CourseAssignment) =>
+    (a.school || '').trim() || a.cohorts.map(c => sheetCohortSchool.get(c)).find(Boolean) || '';
   const unresolved: UnresolvedSession[] = [];
   const roomless: RoomlessSession[] = [];
 
@@ -1060,6 +1068,7 @@ export async function runAutoScheduler(
         departmentId: faculty?.department || course?.department || 'General',
         weeks,
         category:     asgn.category,
+        school:       schoolOf(asgn),
       } as ScheduleEntry;
       entries.push(entry);
       if (cohortWin) entryWindow.set(entry, { start: winStart, end: winEnd });

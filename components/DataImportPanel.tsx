@@ -503,6 +503,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         'Room': (room as any)?._unique_name || room?.name || '',
         'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.facultyId || faculty?.id || '',
         'Faculty_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
+        'School': s.school || '',
       };
 
       if (sessionGroups.length === 0) {
@@ -627,6 +628,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
             endTime: firstRow['_end_time'],
             weeks: weeks.length > 0 ? weeks : [1],
             category: firstRow['_event_type'] as any,
+            // Older backups have no School column; App then takes the cohort's.
+            school: String(firstRow['School'] || '').trim() || undefined,
           });
         });
 

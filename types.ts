@@ -82,6 +82,9 @@ export interface ScheduleEntry {
   departmentId: string;
   weeks: number[];
   category?: string;
+  // School from the course-assignment sheet (the cohort's school, not the
+  // faculty's). Used by the Dashboard filter and "delete one school".
+  school?: string;
   createdBy?: string;
   createdAt?: string;
   updatedBy?: string;

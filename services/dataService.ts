@@ -11,7 +11,7 @@ const SCHEMA: Record<string, string[]> = {
   faculties: ['id', 'facultyId', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],
   rooms:     ['id', 'termId', 'name', 'capacity', 'type'],
   groups:    ['id', 'termId', 'name', 'program', 'semester', 'studentCount'],
-  schedule:  ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category'],
+  schedule:  ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category', 'school'],
 };
 
 // Term-scoped tables — all reads/writes are filtered by termId
@@ -419,6 +419,22 @@ export class DataService {
     const { error } = await q;
     if (error) console.error('[DB] deleteEntries error:', error.message);
     else console.log(`[DB] schedule: bulk-deleted ${ids.length} entries`);
+  }
+
+  // Large deletes (a whole school's timetable). Ids go in the request URL, so
+  // they are sent in chunks; any failure is thrown so the caller can say so.
+  static async deleteScheduleIds(ids: string[], remaining: ScheduleEntry[], termId: string): Promise<void> {
+    if (!supabase || ids.length === 0) { this.persistScheduleSnapshot(remaining); return; }
+    this.markLocalWrite('schedule', ids);
+    this.lastWriteTimestamp = Date.now();
+    for (let i = 0; i < ids.length; i += 150) {
+      const { error } = await supabase.from('schedule').delete()
+        .in('id', ids.slice(i, i + 150)).eq('termId', termId);
+      if (error) throw new Error(error.message);
+    }
+    this.lastWriteTimestamp = Date.now();
+    this.persistScheduleSnapshot(remaining);
+    console.log(`[DB] schedule: deleted ${ids.length} entries`);
   }
 
   static async updateEntry(entry: ScheduleEntry, allEntries: ScheduleEntry[]): Promise<void> {

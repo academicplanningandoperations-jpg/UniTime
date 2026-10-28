@@ -1,5 +1,6 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { cohortSchoolMap, sessionSchool } from '../utils/sessionSchool';
 import { UserAccount, Role, ScheduleEntry, Course, Faculty, Room, StudentGroup } from '../types';
 import {
   UserPlus,
@@ -35,10 +36,21 @@ interface AdminPanelProps {
   activeTermId?: string;
   activeTermName?: string;
   onClearSchedule: () => Promise<void>;
+  onClearSchoolSchedule: (school: string) => Promise<void>;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, onSaveUser, onDeleteUser, currentUser, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users, onSaveUser, onDeleteUser, currentUser, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule, onClearSchoolSchedule }) => {
   const [isAdding, setIsAdding] = useState(false);
+  // Schools in this term's timetable (from the course-assignment sheet), with counts.
+  const [schoolToDelete, setSchoolToDelete] = useState('');
+  const termSchools = useMemo(() => {
+    const termEntries = schedule.filter(e => e.termId === activeTermId);
+    const map = cohortSchoolMap(termEntries);
+    const counts = new Map<string, number>();
+    termEntries.forEach(e => { const s = sessionSchool(e, map); counts.set(s, (counts.get(s) ?? 0) + 1); });
+    return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [schedule, activeTermId]);
+  React.useEffect(() => { setSchoolToDelete(''); }, [activeTermId]);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -345,6 +357,25 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
                   {activeTermName ? ` · ${activeTermName}` : ''}
                 </span>
               </div>
+              <div className="flex items-center gap-2">
+              <select
+                value={schoolToDelete}
+                onChange={e => setSchoolToDelete(e.target.value)}
+                className="text-[10px] font-bold border border-[#cbd5e1] bg-white px-2 py-1.5 max-w-[240px] outline-none focus:border-[#185baf]"
+                title="School from the course-assignment sheet"
+              >
+                <option value="">Pick a school…</option>
+                {termSchools.map(([s, n]) => <option key={s} value={s}>{s} ({n})</option>)}
+              </select>
+              <button
+                onClick={async () => { if (schoolToDelete) { await onClearSchoolSchedule(schoolToDelete); setSchoolToDelete(''); } }}
+                disabled={!schoolToDelete}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-white text-[10px] font-black uppercase tracking-widest shadow-sm hover:opacity-90 transition-opacity border border-orange-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ background: 'linear-gradient(135deg, #c2410c, #ea580c)' }}
+                title="Delete only this school's sessions in the active term"
+              >
+                <Trash2 className="w-3 h-3" /> Delete School
+              </button>
               <button
                 onClick={onClearSchedule}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-white text-[10px] font-black uppercase tracking-widest shadow-sm hover:opacity-90 transition-opacity border border-red-800"
@@ -352,6 +383,7 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
               >
                 <Trash2 className="w-3 h-3" /> Clear All
               </button>
+              </div>
             </div>
 
             {/* Entries table */}

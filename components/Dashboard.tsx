@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { Course, Room, StudentGroup, ScheduleEntry, Clash, Term, Faculty } from '../types';
 import { DataService } from '../services/dataService';
+import { cohortSchoolMap, sessionSchool, NO_SCHOOL } from '../utils/sessionSchool';
 
 interface DashboardProps {
   courses: Course[];
@@ -54,25 +55,24 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
     return activeTerm ? schedule.filter(s => s.termId === activeTerm.id) : schedule;
   }, [schedule, activeTerm]);
 
+  // School of each session = the cohort's school from the course-assignment
+  // sheet (not the faculty's department). See utils/sessionSchool.
+  const schoolById = useMemo(() => {
+    const map = cohortSchoolMap(effectiveSchedule);
+    const out = new Map<string, string>();
+    effectiveSchedule.forEach(s => out.set(s.id, sessionSchool(s, map)));
+    return out;
+  }, [effectiveSchedule]);
+  const schoolOf = (s: ScheduleEntry) => schoolById.get(s.id) || NO_SCHOOL;
+
   const allSchools = useMemo(() => {
-    if (!faculties) return [];
-    const set = new Set<string>();
-    effectiveSchedule.forEach(s => {
-      const f = faculties.find(f => f.id === s.facultyId);
-      const dept = (f as any)?._deptName || f?.department || 'General';
-      set.add(dept);
-    });
-    return Array.from(set).sort();
-  }, [effectiveSchedule, faculties]);
+    return Array.from(new Set(schoolById.values())).sort();
+  }, [schoolById]);
 
   const slicedSchedule = useMemo(() => {
     if (!selectedSchool) return effectiveSchedule;
-    return effectiveSchedule.filter(s => {
-      const f = faculties?.find(f => f.id === s.facultyId);
-      const dept = (f as any)?._deptName || f?.department || 'General';
-      return dept === selectedSchool;
-    });
-  }, [effectiveSchedule, selectedSchool, faculties]);
+    return effectiveSchedule.filter(s => schoolOf(s) === selectedSchool);
+  }, [effectiveSchedule, selectedSchool, schoolById]);
 
   const slicedCourseIds  = useMemo(() => new Set(slicedSchedule.map(s => s.courseId)),  [slicedSchedule]);
   const slicedRoomIds    = useMemo(() => new Set(slicedSchedule.map(s => s.roomId)),    [slicedSchedule]);
@@ -101,11 +101,9 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
   }, [slicedSchedule]);
 
   const schoolData = useMemo(() => {
-    if (!faculties) return [];
     const deptMap = new Map<string, number>();
     effectiveSchedule.forEach(s => {
-      const f = faculties.find(f => f.id === s.facultyId);
-      const dept = (f as any)?._deptName || f?.department || 'General';
+      const dept = schoolOf(s);
       deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
     });
     return Array.from(deptMap.entries())
@@ -116,7 +114,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
       }))
       .sort((a, b) => b.sessions - a.sessions)
       .slice(0, 8);
-  }, [effectiveSchedule, faculties]);
+  }, [effectiveSchedule, schoolById]);
 
   const facultyData = useMemo(() => {
     if (!faculties) return [];
@@ -138,11 +136,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
       let dayHours = 0;
       const facultiesOnDay = new Set<string>();
       schoolsToShow.forEach(school => {
-        const daySessions = effectiveSchedule.filter(s => {
-          const f = faculties?.find(f => f.id === s.facultyId);
-          const dept = (f as any)?._deptName || f?.department || 'General';
-          return dept === school && s.day === day;
-        });
+        const daySessions = effectiveSchedule.filter(s => s.day === day && schoolOf(s) === school);
         entry[school] = daySessions.length;
         total += daySessions.length;
         daySessions.forEach(s => {
@@ -156,7 +150,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
         : 0;
       return entry;
     });
-  }, [effectiveSchedule, faculties, allSchools, selectedSchool]);
+  }, [effectiveSchedule, schoolById, allSchools, selectedSchool]);
 
   const heatmapData = useMemo(() => {
     const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -338,7 +332,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
               <div>
                 <h4 className="text-[12px] font-black text-[#0f172a] tracking-tight">School-wise Sessions</h4>
                 <p className="text-[9px] text-[#94a3b8] uppercase tracking-widest font-bold mt-0.5">
-                  {selectedSchool ? `Highlighted: ${selectedSchool}` : 'All departments'}
+                  {selectedSchool ? `Highlighted: ${selectedSchool}` : 'All schools'}
                 </p>
               </div>
             </div>

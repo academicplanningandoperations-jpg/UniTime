@@ -34,6 +34,7 @@ import { AuthService } from './services/authService';
 import { UsageMeter, startUsageReporting } from './services/usageMeter';
 import TermSwitchLoader from './components/TermSwitchLoader';
 import { withoutAudit } from './utils/lastChange';
+import { cohortSchoolMap, schoolFromCohorts, sessionSchool } from './utils/sessionSchool';
 
 const App: React.FC = () => {
   // Who is signed in comes from the Supabase Auth session (checked by the
@@ -630,8 +631,11 @@ const App: React.FC = () => {
     if (!termId) { alert('No active term — nothing was saved.'); return; }
     pushHistory();
     const now = new Date().toISOString();
+    // Sheet sessions carry their school; a session made by hand takes its cohort's.
+    const schoolMap = cohortSchoolMap(scheduleRef.current.filter(s => s.termId === termId));
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
+      school: (ne.school || '').trim() || schoolFromCohorts(ne.groupIds, schoolMap) || undefined,
       id: newSessionId(index),
       // Always the term on screen — never a value carried in from a form or file.
       termId,
@@ -1065,6 +1069,39 @@ const App: React.FC = () => {
     }
   };
 
+  // Admin: delete one school's sessions in the active term, so a corrected
+  // sheet for that school can be uploaded again without touching other schools.
+  // The school is the one from the course-assignment sheet (see sessionSchool).
+  const handleClearSchoolSchedule = async (school: string) => {
+    if (!canWrite()) return;
+    const termId = activeTermIdRef.current;
+    const termName = effectiveActiveTerm?.name || termId;
+    if (!termId || !school) return;
+    const termEntries = scheduleRef.current.filter(s => s.termId === termId);
+    const map = cohortSchoolMap(termEntries);
+    const ids = termEntries.filter(s => sessionSchool(s, map) === school).map(s => s.id);
+    if (ids.length === 0) { alert(`No sessions for "${school}" in term "${termName}".`); return; }
+    if (!confirm(`Delete ${ids.length} timetable entries of "${school}" in term "${termName}"?
+
+Other schools and other terms are not affected. This cannot be undone.`)) return;
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    try {
+      const gone = new Set(ids);
+      const remaining = scheduleRef.current.filter(s => !gone.has(s.id));
+      await DataService.deleteScheduleIds(ids, remaining, termId);
+      setScheduleAndRef(remaining);
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      syncHistoryState();
+    } catch (err: any) {
+      alert('Failed to delete the school timetable: ' + (err.message || 'Unknown error') + '\n\nSome sessions may already be deleted — reload the page to see what is left.');
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => { isSyncingRef.current = false; }, 2000);
+    }
+  };
+
   // (A "re-link ALL data to the active term" function used to live here. It MOVED
   // every course/faculty/room/cohort from every term into the active one, which
   // would break a past term's timetable. It was never connected to a button and
@@ -1390,7 +1427,7 @@ const App: React.FC = () => {
               <AutoSchedulePanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} activeTermId={effectiveActiveTerm?.id} onApplySchedule={handleSaveSession} currentUser={currentUser} schedule={schedule} />
             </div>
           )}
-          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
+          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} onClearSchoolSchedule={handleClearSchoolSchedule} />}
           {activeTab === 'backlog' && (currentUser.role !== Role.VIEWER) && <BacklogPanel />}
         </div>
       </main>

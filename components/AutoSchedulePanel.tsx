@@ -666,6 +666,12 @@ const AutoSchedulePanel: React.FC<Props> = ({
                     : 'not running on this PC'}
                 </span>
               )}
+              {method === 'solver' && !solverStatus && (
+                <span className="basis-full text-[9px] text-[#64748b] leading-snug">
+                  Solver window open? Then the browser is blocking it: click the icon left of the web address →
+                  Site settings → <b>Local network access</b> → <b>Allow</b>, then reload the page.
+                </span>
+              )}
             </div>
             {method === 'standard' ? (
               <div className="flex items-center gap-2 mb-1.5 px-0.5" title="More attempts take longer but usually leave fewer conflicts">

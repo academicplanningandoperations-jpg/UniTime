@@ -16,7 +16,10 @@ const newer = (a: string, b: string) => {
 };
 export const solverOutdated = (s: SolverStatus | null) => !!s && !newer(s.version, SOLVER_MIN_VERSION);
 
-export async function checkSolver(timeoutMs = 1500): Promise<SolverStatus | null> {
+// A closed port fails at once, so the long timeout only matters while the
+// browser is showing its "allow local network access?" question — the check
+// must keep waiting until it is answered, or the question disappears.
+export async function checkSolver(timeoutMs = 60000): Promise<SolverStatus | null> {
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);

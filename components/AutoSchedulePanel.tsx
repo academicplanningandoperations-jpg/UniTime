@@ -669,7 +669,8 @@ const AutoSchedulePanel: React.FC<Props> = ({
               {method === 'solver' && !solverStatus && (
                 <span className="basis-full text-[9px] text-[#64748b] leading-snug">
                   Solver window open? Then the browser is blocking it: click the icon left of the web address →
-                  Site settings → <b>Local network access</b> → <b>Allow</b>, then reload the page.
+                  <b>Site settings</b> → allow <b>apps on this device</b> (also called <i>loopback</i>; it is separate from
+                  "Local network"), then reload the page.
                 </span>
               )}
             </div>

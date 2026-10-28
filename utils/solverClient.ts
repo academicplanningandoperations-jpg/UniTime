@@ -6,6 +6,9 @@ import type { SchedulerResult, SolverProblem, UnresolvedSession } from './autoSc
 // and UniTime saves the result as usual when Apply is clicked.
 export const SOLVER_URL = 'http://127.0.0.1:8765';
 export const SOLVER_MIN_VERSION = '1.0.0';
+// Tells Chrome/Edge this request goes to a program on this same computer, so it
+// asks the right permission ("apps on this device" / loopback). Ignored elsewhere.
+const LOOPBACK = { targetAddressSpace: 'loopback' } as RequestInit;
 
 export interface SolverStatus { ok: boolean; version: string; busy: boolean }
 
@@ -23,7 +26,7 @@ export async function checkSolver(timeoutMs = 60000): Promise<SolverStatus | nul
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
-    const r = await fetch(`${SOLVER_URL}/health`, { signal: ctl.signal });
+    const r = await fetch(`${SOLVER_URL}/health`, { signal: ctl.signal, ...LOOPBACK });
     clearTimeout(t);
     if (!r.ok) return null;
     const j = await r.json();
@@ -54,7 +57,7 @@ export async function runSolver(
     const secs = Math.round((Date.now() - started) / 1000);
     let text = `Solver working · ${secs}s of up to ${timeLimitSec}s`;
     try {
-      const p = await (await fetch(`${SOLVER_URL}/progress`)).json();
+      const p = await (await fetch(`${SOLVER_URL}/progress`, LOOPBACK)).json();
       if (p?.phase === 'placing' && typeof p.best === 'number') text += ` · best so far: ${p.best} of ${total} placed`;
       else if (p?.phase) text += ` · ${p.phase}`;
     } catch { /* progress is optional */ }
@@ -62,6 +65,7 @@ export async function runSolver(
   }, 2000);
   try {
     const r = await fetch(`${SOLVER_URL}/solve`, {
+      ...LOOPBACK,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ problem: payload, timeLimit: timeLimitSec }),

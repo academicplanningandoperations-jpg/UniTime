@@ -25,14 +25,13 @@ import {
 import { 
   Plus, MapPin, Download, ChevronUp, ChevronDown, Calendar, LayoutGrid, Clock
 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { DataService } from './services/dataService';
 import { supabase } from './services/supabase';
 import { AuthService } from './services/authService';
 import { UsageMeter, startUsageReporting } from './services/usageMeter';
 import TermSwitchLoader from './components/TermSwitchLoader';
+import PdfExportModal from './components/PdfExportModal';
 import { withoutAudit } from './utils/lastChange';
 import { cohortSchoolMap, schoolFromCohorts, sessionSchool } from './utils/sessionSchool';
 
@@ -1109,107 +1108,9 @@ Other schools and other terms are not affected. This cannot be undone.`)) return
 
 
 
-  const handleExportPDF = async () => {
-    setIsSyncing(true);
-    try {
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      const activeTerm = effectiveActiveTerm; // the term on screen, not the default one
-      const dateStr = new Date().toLocaleDateString();
-
-      // Title Page
-      pdf.setFontSize(24);
-      pdf.setTextColor(15, 23, 42); // slate-900
-      pdf.text('University Timetable Report', 148, 60, { align: 'center' });
-      
-      pdf.setFontSize(14);
-      pdf.setTextColor(100, 116, 139); // slate-500
-      pdf.text(`Term: ${activeTerm?.name || 'All Terms'}`, 148, 75, { align: 'center' });
-      pdf.text(`Generated on: ${dateStr}`, 148, 85, { align: 'center' });
-
-      // Summary Stats
-      pdf.setFontSize(18);
-      pdf.setTextColor(15, 23, 42);
-      pdf.text('Summary Statistics', 20, 110);
-      
-      const stats = [
-        ['Total Courses', courses.length.toString()],
-        ['Total Faculty', faculties.length.toString()],
-        ['Total Rooms', rooms.length.toString()],
-        ['Total Student Groups', groups.length.toString()],
-        ['Scheduled Sessions', schedule.length.toString()]
-      ];
-
-      autoTable(pdf, {
-        startY: 120,
-        head: [['Metric', 'Count']],
-        body: stats,
-        theme: 'striped',
-        headStyles: { fillColor: [37, 99, 235] }, // blue-600
-        margin: { left: 20, right: 20 }
-      });
-
-      // Grouped Schedules by Student Group
-      groups.forEach((group) => {
-        const groupSchedule = schedule.filter(s => s.groupIds?.includes(group.id));
-        if (groupSchedule.length === 0) return;
-
-        pdf.addPage();
-        pdf.setFontSize(16);
-        pdf.setTextColor(15, 23, 42);
-        pdf.text(`Timetable: ${group.name} (${group.program})`, 20, 20);
-        pdf.setFontSize(10);
-        pdf.text(`Semester: ${group.semester}`, 20, 28);
-
-        const tableData = groupSchedule
-          .sort((a, b) => {
-            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-            if (a.day !== b.day) return days.indexOf(a.day) - days.indexOf(b.day);
-            return a.startTime.localeCompare(b.startTime);
-          })
-          .map(s => {
-            const course = courses.find(c => c.id === s.courseId);
-            const room = rooms.find(r => r.id === s.roomId);
-            const faculty = faculties.find(f => f.id === s.facultyId);
-            return [
-              s.day,
-              `${s.startTime} - ${s.endTime}`,
-              course ? `${course.code}: ${course.name}` : 'Unknown',
-              s.category || 'Theory',
-              room?.name || 'Unknown',
-              faculty?.name || 'Unknown'
-            ];
-          });
-
-        autoTable(pdf, {
-          startY: 35,
-          head: [['Day', 'Time', 'Course', 'Category', 'Room', 'Faculty']],
-          body: tableData,
-          theme: 'grid',
-          headStyles: { fillColor: [15, 23, 42] }, // slate-900
-          styles: { fontSize: 8 },
-          columnStyles: {
-            0: { cellWidth: 25 },
-            1: { cellWidth: 35 },
-            2: { cellWidth: 80 },
-            3: { cellWidth: 25 },
-            4: { cellWidth: 30 },
-            5: { cellWidth: 40 }
-          }
-        });
-      });
-
-      pdf.save(`university-timetable-report-${new Date().toISOString().split('T')[0]}.pdf`);
-    } catch (error) {
-      console.error('PDF Report Generation failed:', error);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
+  // Export PDF opens a dialog: cohort or faculty timetables, by school or one.
+  const [isPdfExportOpen, setIsPdfExportOpen] = useState(false);
+  const handleExportPDF = () => setIsPdfExportOpen(true);
 
   const handleAutoTile = () => {
     // Create 4 panels with different view types, sized to fit the grid perfectly
@@ -1349,6 +1250,18 @@ Other schools and other terms are not affected. This cannot be undone.`)) return
       />
 
       {termLoading && <TermSwitchLoader termName={termLoading} />}
+
+      {isPdfExportOpen && (
+        <PdfExportModal
+          onClose={() => setIsPdfExportOpen(false)}
+          schedule={effectiveActiveTerm ? schedule.filter(s => s.termId === effectiveActiveTerm.id) : schedule}
+          termName={effectiveActiveTerm?.name || 'All terms'}
+          courses={courses}
+          faculties={faculties}
+          rooms={rooms}
+          groups={groups}
+        />
+      )}
 
       <main className="flex-1 relative overflow-hidden bg-[#f0f6ff]">
         <div className="h-full w-full overflow-auto custom-scrollbar">

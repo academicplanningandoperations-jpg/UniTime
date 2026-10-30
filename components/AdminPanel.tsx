@@ -45,11 +45,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onSaveUser, onDeleteUser
   const [schoolToDelete, setSchoolToDelete] = useState('');
   const termSchools = useMemo(() => {
     const termEntries = schedule.filter(e => e.termId === activeTermId);
-    const map = cohortSchoolMap(termEntries);
+    const map = cohortSchoolMap(termEntries, groups.filter(g => !g.termId || g.termId === activeTermId));
     const counts = new Map<string, number>();
     termEntries.forEach(e => { const s = sessionSchool(e, map); counts.set(s, (counts.get(s) ?? 0) + 1); });
     return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [schedule, activeTermId]);
+  }, [schedule, groups, activeTermId]);
   React.useEffect(() => { setSchoolToDelete(''); }, [activeTermId]);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);

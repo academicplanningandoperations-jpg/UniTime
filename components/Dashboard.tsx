@@ -58,11 +58,11 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
   // School of each session = the cohort's school from the course-assignment
   // sheet (not the faculty's department). See utils/sessionSchool.
   const schoolById = useMemo(() => {
-    const map = cohortSchoolMap(effectiveSchedule);
+    const map = cohortSchoolMap(effectiveSchedule, activeTerm ? groups.filter(g => !g.termId || g.termId === activeTerm.id) : groups);
     const out = new Map<string, string>();
     effectiveSchedule.forEach(s => out.set(s.id, sessionSchool(s, map)));
     return out;
-  }, [effectiveSchedule]);
+  }, [effectiveSchedule, groups, activeTerm]);
   const schoolOf = (s: ScheduleEntry) => schoolById.get(s.id) || NO_SCHOOL;
 
   const allSchools = useMemo(() => {

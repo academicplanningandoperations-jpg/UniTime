@@ -1,14 +1,23 @@
-import type { ScheduleEntry } from '../types';
+import type { ScheduleEntry, StudentGroup } from '../types';
 
 // A session's school comes from the course-assignment sheet (stored on the
 // session when the auto-schedule is applied). Sessions added by hand have no
-// school of their own, so they take the school their cohorts have on the
-// sheet sessions. The faculty's department and the cohort upload's School
-// column are never used here.
+// school of their own, so they take their cohorts' school:
+//   1. the school the cohort has on the sheet sessions, else
+//   2. the School saved on the cohort itself (cohort upload / edit form; kept
+//      in the cohort's `program` field). Older terms' cohorts have "General"
+//      there, which means "no school", so those terms are not affected.
+// The faculty's department is never used here.
 
 export const NO_SCHOOL = 'No school (not from a sheet)';
 
-export function cohortSchoolMap(entries: ScheduleEntry[]): Map<string, string> {
+// The School saved on a cohort, or '' when it has none.
+export const groupSchool = (g?: Pick<StudentGroup, 'program'> | null): string => {
+  const p = (g?.program || '').trim();
+  return p && p.toLowerCase() !== 'general' ? p : '';
+};
+
+export function cohortSchoolMap(entries: ScheduleEntry[], groups: StudentGroup[] = []): Map<string, string> {
   const counts = new Map<string, Map<string, number>>();
   for (const e of entries) {
     const s = (e.school || '').trim();
@@ -26,6 +35,12 @@ export function cohortSchoolMap(entries: ScheduleEntry[]): Map<string, string> {
     m.forEach((c, s) => { if (c > n) { best = s; n = c; } });
     out.set(g, best);
   });
+  // Cohorts with no sheet sessions yet: use the School saved on the cohort.
+  for (const g of groups) {
+    if (out.has(g.id)) continue;
+    const s = groupSchool(g);
+    if (s) out.set(g.id, s);
+  }
   return out;
 }
 

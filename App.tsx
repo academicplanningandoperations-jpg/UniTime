@@ -631,7 +631,7 @@ const App: React.FC = () => {
     pushHistory();
     const now = new Date().toISOString();
     // Sheet sessions carry their school; a session made by hand takes its cohort's.
-    const schoolMap = cohortSchoolMap(scheduleRef.current.filter(s => s.termId === termId));
+    const schoolMap = cohortSchoolMap(scheduleRef.current.filter(s => s.termId === termId), groups.filter(g => !g.termId || g.termId === termId));
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
       school: (ne.school || '').trim() || schoolFromCohorts(ne.groupIds, schoolMap) || undefined,
@@ -1077,7 +1077,7 @@ const App: React.FC = () => {
     const termName = effectiveActiveTerm?.name || termId;
     if (!termId || !school) return;
     const termEntries = scheduleRef.current.filter(s => s.termId === termId);
-    const map = cohortSchoolMap(termEntries);
+    const map = cohortSchoolMap(termEntries, groups.filter(g => !g.termId || g.termId === termId));
     const ids = termEntries.filter(s => sessionSchool(s, map) === school).map(s => s.id);
     if (ids.length === 0) { alert(`No sessions for "${school}" in term "${termName}".`); return; }
     if (!confirm(`Delete ${ids.length} timetable entries of "${school}" in term "${termName}"?
@@ -1259,7 +1259,7 @@ Other schools and other terms are not affected. This cannot be undone.`)) return
           courses={courses}
           faculties={faculties}
           rooms={rooms}
-          groups={groups}
+          groups={effectiveActiveTerm ? groups.filter(g => !g.termId || g.termId === effectiveActiveTerm.id) : groups}
         />
       )}
 

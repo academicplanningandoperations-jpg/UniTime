@@ -80,6 +80,7 @@ interface DataImportPanelProps {
   terms: Term[];
   onUpdateRecord: (table: RegistryTable, item: any) => Promise<void>;
   onTransferFacultyLoad: (fromId: string, toId: string) => Promise<number>;
+  onMoveCohortSessionsSchool?: (cohortId: string, school: string) => Promise<number>;
   onCopyFromTerm: (sourceTermId: string, tables: RegistryTable[]) => Promise<string>;
   readOnlyReason?: string | null;
 }
@@ -91,7 +92,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
   courses, faculties, rooms, cohorts, schedule,
   onUploadCourses, onUploadFaculties, onUploadRooms, onUploadCohorts,
   onRestoreSchedule, onWipeData, activeTermId, activeTermName,
-  terms, onUpdateRecord, onTransferFacultyLoad, onCopyFromTerm, readOnlyReason
+  terms, onUpdateRecord, onTransferFacultyLoad, onMoveCohortSessionsSchool, onCopyFromTerm, readOnlyReason
 }) => {
   const [activeTab, setActiveTab] = useState<AllTabType>('Modules');
   const [lastUpload, setLastUpload] = useState<{ type: string; count: number } | null>(null);
@@ -121,7 +122,27 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
   const [editing, setEditing] = useState<{ table: RegistryTable; original: any; draft: any } | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  const openEdit = (table: RegistryTable, item: any) => setEditing({ table, original: item, draft: { ...item } });
+  // Cohort School: also move the cohort's sessions in this term to the new school.
+  const [moveCohortSessions, setMoveCohortSessions] = useState(true);
+  const openEdit = (table: RegistryTable, item: any) => {
+    setMoveCohortSessions(true);
+    setEditing({ table, original: item, draft: table === 'groups' ? { ...item, program: cohortSchool(item) } : { ...item } });
+  };
+  // Schools to suggest while typing a cohort's School (avoids "School of CS" vs
+  // "School of Computer Science" typos).
+  const knownSchools = useMemo(() => {
+    const s = new Set<string>();
+    cohorts.forEach(g => { const v = cohortSchool(g); if (v) s.add(v); });
+    schedule.forEach(e => { const v = (e.school || '').trim(); if (v) s.add(v); });
+    return [...s].sort();
+  }, [cohorts, schedule]);
+  // Sessions of the cohort being edited (this term) that are not under the new school yet.
+  const cohortSessionsToMove = useMemo(() => {
+    if (!editing || editing.table !== 'groups') return 0;
+    const school = String(editing.draft.program ?? '').trim();
+    return schedule.filter(e => e.termId === activeTermId && (e.groupIds || []).includes(editing.original.id)
+      && (e.school || '') !== school).length;
+  }, [editing, schedule, activeTermId]);
 
   const saveEdit = async () => {
     if (!editing) return;
@@ -150,9 +171,15 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         String(r[identity.key] ?? '').toLowerCase() === value);
       if (clash && !confirm(`Another record in this term already uses ${identity.label} "${updated[identity.key]}". Save anyway?`)) return;
     }
+    // An empty School is saved as "General" (= no school), like an upload without one.
+    if (table === 'groups' && !updated.program) updated.program = 'General';
     setIsSavingEdit(true);
     try {
       await onUpdateRecord(table, updated);
+      if (table === 'groups' && moveCohortSessions && cohortSessionsToMove > 0 && onMoveCohortSessionsSchool
+        && cohortSchool(updated) !== cohortSchool(original)) {
+        await onMoveCohortSessionsSchool(updated.id, cohortSchool(updated));
+      }
       setEditing(null);
     } finally {
       setIsSavingEdit(false);
@@ -1372,10 +1399,22 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
                 <label key={f.key} className="block">
                   <span className="text-[10px] font-bold uppercase text-[#555] tracking-wide">{f.label}</span>
                   <input type={f.type} value={editing.draft[f.key] ?? ''}
+                    list={editing.table === 'groups' && f.key === 'program' ? 'known-schools' : undefined}
+                    placeholder={editing.table === 'groups' && f.key === 'program' ? 'Pick or type a school' : undefined}
                     onChange={e => setEditing(prev => prev && { ...prev, draft: { ...prev.draft, [f.key]: e.target.value } })}
                     className="mt-1 w-full border border-[#ccc] px-2 py-1.5 text-sm focus:outline-none focus:border-[#185baf]" />
                 </label>
               ))}
+              {editing.table === 'groups' && (
+                <datalist id="known-schools">{knownSchools.map(s => <option key={s} value={s} />)}</datalist>
+              )}
+              {editing.table === 'groups' && cohortSchool({ program: String(editing.draft.program ?? '').trim() }) !== cohortSchool(editing.original) && cohortSessionsToMove > 0 && (
+                <label className="flex items-start gap-2 bg-[#fff7ed] border border-[#fed7aa] px-2.5 py-2 text-[12px] text-[#7c2d12] cursor-pointer">
+                  <input type="checkbox" className="mt-0.5" checked={moveCohortSessions} onChange={e => setMoveCohortSessions(e.target.checked)} />
+                  <span>Also move this cohort's <b>{cohortSessionsToMove}</b> class{cohortSessionsToMove === 1 ? '' : 'es'} in this term to
+                    {' '}<b>{String(editing.draft.program ?? '').trim() || 'no school'}</b> (Delete School, Dashboard and PDF use it). Other terms are not changed.</span>
+                </label>
+              )}
               <p className="text-[11px] text-[#666] leading-snug">
                 Sessions link to this record by its internal ID, so every session that uses it shows the new details right away.
               </p>

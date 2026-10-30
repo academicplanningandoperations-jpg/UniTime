@@ -970,6 +970,28 @@ const App: React.FC = () => {
     return ok ? moved.length : 0;
   };
 
+  // After a cohort's School is changed: put that cohort's sessions in the active
+  // term under the new school too (sessions keep the school they were made with,
+  // so without this they would stay under the old one). Undo-able.
+  const handleMoveCohortSessionsSchool = async (cohortId: string, school: string): Promise<number> => {
+    const termId = activeTermIdRef.current;
+    if (!canWrite() || !cohortId || !termId) return 0;
+    const now = new Date().toISOString();
+    const who = currentUser?.name || currentUser?.username || 'Unknown';
+    const moved = scheduleRef.current
+      .filter(s => s.termId === termId && (s.groupIds || []).includes(cohortId) && (s.school || '') !== school)
+      .map(s => ({ ...s, school: school || undefined, updatedBy: who, updatedAt: now }));
+    if (moved.length === 0) return 0;
+    pushHistory();
+    await withSync(async () => {
+      const movedById = new Map(moved.map(m => [m.id, m] as [string, ScheduleEntry]));
+      const updatedSchedule = scheduleRef.current.map(s => movedById.get(s.id) || s);
+      setScheduleAndRef(updatedSchedule);
+      await DataService.addEntries(moved, updatedSchedule); // upsert, in batches
+    });
+    return moved.length;
+  };
+
   // Copy courses / faculty / rooms / cohorts from another term INTO the active
   // term, so a new term can start from last term's setup. Copies get new ids
   // belonging to the active term; the source term is only read, never changed.
@@ -1332,7 +1354,7 @@ Other schools and other terms are not affected. This cannot be undone.`)) return
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} onDeleteMultiple={handleDeleteMultipleSessions} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { switchTerm(id); setActiveTab('dashboard'); }} viewingTermId={effectiveActiveTerm?.id ?? null} />}
-          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} cohorts={groups} schedule={schedule} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadCohorts={handleUpdateGroups} onRestoreSchedule={handleSaveSession} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} terms={terms} onUpdateRecord={handleUpdateRecord} onTransferFacultyLoad={handleTransferFacultyLoad} onCopyFromTerm={handleCopyRegistryFromTerm} readOnlyReason={writeBlockReason} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} cohorts={groups} schedule={schedule} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadCohorts={handleUpdateGroups} onRestoreSchedule={handleSaveSession} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} terms={terms} onUpdateRecord={handleUpdateRecord} onTransferFacultyLoad={handleTransferFacultyLoad} onMoveCohortSessionsSchool={handleMoveCohortSessionsSchool} onCopyFromTerm={handleCopyRegistryFromTerm} readOnlyReason={writeBlockReason} />}
           {/* Keep AutoSchedulePanel always mounted (never unmounts on tab switch) so that
               uploaded files, generated results, and progress state are never lost. */}
           {(currentUser.role !== Role.VIEWER) && (

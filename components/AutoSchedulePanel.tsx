@@ -10,6 +10,7 @@ import {
   type CourseAssignment,
   type UnresolvedSession,
   type RoomlessSession,
+  type BookedClash,
   type SchedulerResult,
   parseClockHour,
 } from '../utils/autoScheduler';
@@ -54,7 +55,7 @@ function getErrorCategory(u: UnresolvedSession): string {
   return 'No Viable Slot';
 }
 
-function downloadConflictReport(unresolved: UnresolvedSession[], termName: string, roomless: RoomlessSession[] = []) {
+function downloadConflictReport(unresolved: UnresolvedSession[], termName: string, roomless: RoomlessSession[] = [], booked: BookedClash[] = []) {
   const headers = [
     'Error Category',
     'Course Code', 'Course Name', 'Faculty ID', 'Faculty Name', 'Cohorts', 'Category',
@@ -104,6 +105,18 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
     { wch: 12 }, { wch: 26 }, { wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 12 }, { wch: 8 }, { wch: 8 },
   ];
   XLSX.utils.book_append_sheet(wb, wsRoom, 'Sessions Without Room');
+
+  // Third sheet: booked classes (Course-Day-Block + one Course-Time-Block hour)
+  // that were created at their booked time although something there clashes.
+  const bookedHeaders = ['Course Code', 'Course Name', 'Faculty ID', 'Faculty Name', 'Cohorts', 'Category', 'Day', 'Start', 'End', 'What clashes'];
+  const bookedRows = booked.map(b => [
+    b.courseCode, b.courseName, b.facultyId, b.facultyName, b.cohorts.join(', '), b.category, b.day, b.startTime, b.endTime, b.problems.join('; '),
+  ]);
+  const wsBooked = XLSX.utils.aoa_to_sheet([bookedHeaders, ...bookedRows]);
+  wsBooked['!cols'] = [
+    { wch: 12 }, { wch: 26 }, { wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 90 },
+  ];
+  XLSX.utils.book_append_sheet(wb, wsBooked, 'Booked Slot Clashes');
 
   const date = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `conflict_report_${termName.replace(/\s+/g, '_')}_${date}.xlsx`);
@@ -735,7 +748,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                   {/* Conflict report icon — always visible in status bar after completion */}
                   {result && stage === 'done' && (
                     <button
-                      onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless)}
+                      onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless, result.bookedClashes ?? [])}
                       className="w-6 h-6 flex items-center justify-center shrink-0 ml-1 hover:opacity-80 transition-opacity"
                       style={{ background: (result.unresolved.length > 0 || result.roomless.length > 0) ? 'linear-gradient(135deg,#d97706,#b45309)' : 'linear-gradient(135deg,#059669,#047857)' }}
                       title={result.unresolved.length > 0 || result.roomless.length > 0 ? `Download conflict report (${result.unresolved.length} unresolved, ${result.roomless.length} without room)` : 'Download report — all sessions placed successfully'}>
@@ -784,6 +797,26 @@ const AutoSchedulePanel: React.FC<Props> = ({
                     </button>
                   )}
 
+                  {/* Booked classes placed at their booked time despite a clash */}
+                  {result && (result.bookedClashes?.length ?? 0) > 0 && (
+                    <div className="border-2 border-[#fecaca] overflow-hidden">
+                      <div className="flex items-center gap-1.5 px-3 py-2 text-[9px] font-black text-[#b91c1c] uppercase tracking-widest"
+                        style={{ background: 'linear-gradient(135deg,#fef2f2,#fee2e2)' }}>
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span className="flex-1">{result.bookedClashes!.length} booked class{result.bookedClashes!.length === 1 ? '' : 'es'} placed with a clash — check them</span>
+                      </div>
+                      <div className="max-h-[180px] overflow-y-auto divide-y divide-[#fee2e2] text-[10px]">
+                        {result.bookedClashes!.map((b, i) => (
+                          <div key={i} className="px-3 py-1.5">
+                            <p className="font-bold text-[#7f1d1d]">{b.courseCode} · {b.day.slice(0, 3)} {b.startTime}–{b.endTime} · {b.cohorts.join(', ')}</p>
+                            <p className="text-[#991b1b]">{b.problems.join(' · ')}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="px-3 py-1.5 text-[9px] text-[#7f1d1d] bg-[#fef2f2]">Also in the conflict report, sheet "Booked Slot Clashes".</p>
+                    </div>
+                  )}
+
                   {/* Unresolved */}
                   {result && result.unresolved.length > 0 && (
                     <div className="border-2 border-[#fde68a] overflow-hidden">
@@ -798,7 +831,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                       </button>
                       {/* Download button — full width so it's always visible */}
                       <button
-                        onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless)}
+                        onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless, result.bookedClashes ?? [])}
                         className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:opacity-90 transition-opacity"
                         style={{ background: 'linear-gradient(135deg,#d97706,#b45309)' }}>
                         <Download className="w-3.5 h-3.5" /> Download Conflict Report (Excel)
@@ -883,7 +916,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                         {showRoomless ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
                       </button>
                       <button
-                        onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless)}
+                        onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term', result.roomless, result.bookedClashes ?? [])}
                         className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:opacity-90 transition-opacity"
                         style={{ background: 'linear-gradient(135deg,#dc2626,#991b1b)' }}>
                         <Download className="w-3.5 h-3.5" /> Download Report (includes "Sessions Without Room" sheet)

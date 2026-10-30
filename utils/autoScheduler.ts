@@ -100,10 +100,26 @@ export interface RoomlessSession {
   endTime: string;
 }
 
+// A booked class (Course-Day-Block + one Course-Time-Block hour) that was
+// created at its booked time even though something there is not right.
+export interface BookedClash {
+  courseCode: string;
+  courseName: string;
+  facultyId: string;
+  facultyName: string;
+  cohorts: string[];
+  category: string;
+  day: string;
+  startTime: string;
+  endTime: string;
+  problems: string[];
+}
+
 export interface SchedulerResult {
   entries: ScheduleEntry[];
   unresolved: UnresolvedSession[];
   roomless: RoomlessSession[];
+  bookedClashes?: BookedClash[];
   stats: { totalSessions: number; placed: number; unresolvedCount: number };
   // Filled only when asked for (options.exportProblem): everything the
   // separate solver program needs, worked out with exactly these rules.
@@ -155,6 +171,11 @@ export interface SolverProblem {
   // keep the reasons this scheduler gave them.
   preUnresolved: UnresolvedSession[];
   totalSessions: number;
+  // Booked classes, already placed before the solver runs (kept in UniTime;
+  // not sent to the solver, which sees them as busy hours).
+  fixed?: ScheduleEntry[];
+  fixedRoomless?: RoomlessSession[];
+  bookedClashes?: BookedClash[];
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -668,9 +689,107 @@ export async function runAutoScheduler(
   // Each session's allowed window, for the consolidation pass further down.
   const entryWindow = new Map<ScheduleEntry, { start: number; end: number }>();
 
+  // ── Booked rows ───────────────────────────────────────────────────────────
+  // Course-Day-Block + ONE hour in Course-Time-Block = a booking: one class on
+  // each listed day, starting at that hour (length from the Category: Theory 1
+  // hour, Lab = LabHours, …). Booked classes are placed before everything else
+  // and are always created; anything wrong with the slot (faculty or cohort
+  // busy, outside their hours or days, no free room) is listed in
+  // bookedClashes. Several hours in Course-Time-Block keep the old meaning:
+  // "this course may only start at these hours".
+  const isBooked = (a: CourseAssignment) =>
+    !!a.courseCode.trim() && parseDays(a.courseDayBlock).length > 0 && parseHours(a.courseTimeBlock).length === 1;
+  const bookedRows = new Set(assignments.filter(isBooked));
+  const bookedClashes: BookedClash[] = [];
+  for (const asgn of bookedRows) {
+    const elective = parseElective(asgn.category);
+    const cat      = elective ? elective.base : asgn.category.toLowerCase();
+    const isLab    = cat === 'lab';
+    const duration = isLab ? (asgn.labHours || 2) : cat === 'mba' ? 1.5 : cat === 'edge' ? 2 : 1;
+    const course   = findCourse(asgn.courseCode);
+    const faculty  = findFaculty(asgn.facultyId, asgn.facultyName);
+    const groups   = asgn.cohorts.map(findGroup).filter(Boolean) as StudentGroup[];
+    const start    = parseHours(asgn.courseTimeBlock)[0];
+    const startTime = padTime(start), endTime = padTime(start + duration);
+    const workDays = parseDays(asgn.workingDays).length ? parseDays(asgn.workingDays) : DAYS_MAP['Mon-Fri'];
+    const facStart = asgn.timeStart || 8, facEnd = asgn.timeEnd || 16;
+    const missingCohorts = asgn.cohorts.filter(c => !findGroup(c));
+    const listed = asgn.fixedRoom ? [findRoom(asgn.fixedRoom)] : asgn.preferredRooms.map(findRoom);
+    const roomChoices = listed.filter(Boolean) as Room[];
+    const roomPool = roomChoices.length > 0 ? roomChoices : existingRooms.filter(r => {
+      const t = (r.type || '').toLowerCase();
+      return isLab ? t.includes('lab') : !t.includes('lab') && !t.includes('studio') && !t.includes('audit');
+    });
+
+    for (const day of parseDays(asgn.courseDayBlock)) {
+      const keys = slotKeys(day, startTime, endTime);
+      const problems: string[] = [];
+      if (asgn.facultyId && !faculty) problems.push(`Faculty ID "${asgn.facultyId}" is not in the Faculty list of this term`);
+      if (!course) problems.push(`Course "${asgn.courseCode}" is not in the Modules list of this term`);
+      if (missingCohorts.length) problems.push(`Cohort(s) not in the Cohorts list: ${missingCohorts.join(', ')}`);
+      if (faculty && !isFree(facultyOcc, faculty.id, keys)) problems.push('The faculty already has a class or blocked time then');
+      for (const g of groups) {
+        // Courses of the same elective basket may share a slot.
+        const busy = keys.some(k => cohortOcc.get(g.id)?.has(k) && !(elective && electiveSlot.get(`${g.id}|${k}`) === elective.key));
+        if (busy) problems.push(`Cohort ${g.name} already has a class or blocked time then`);
+        const w = cohortWindow.get(g.id);
+        if (w && (start < w.start || start + duration > w.end)) problems.push(`Outside cohort ${g.name}'s hours (${fmtHour(w.start)}–${fmtHour(w.end)})`);
+      }
+      if (!workDays.includes(day)) problems.push(`${day} is not one of the faculty's working days (${asgn.workingDays || 'Mon-Fri'})`);
+      if (start < facStart || start + duration > facEnd) problems.push(`Outside the faculty's hours (${fmtHour(facStart)}–${fmtHour(facEnd)})`);
+      const room = roomPool.find(r => isFree(roomOcc, r.id, keys));
+      if (!room) problems.push(roomChoices.length ? 'None of its rooms is free then — placed without a room' : 'No free room then — placed without a room');
+
+      if (faculty) {
+        markBusy(facultyOcc, faculty.id, keys);
+        if (!isLab) markBusy(facultyNonLabOcc, faculty.id, keys);
+      }
+      groups.forEach(g => {
+        const shared = !!elective && keys.every(k => electiveSlot.get(`${g.id}|${k}`) === elective.key);
+        markBusy(cohortOcc, g.id, keys);
+        markBusy(cohortClassOcc, g.id, keys);
+        if (isLab) markBusy(cohortLabOcc, g.id, keys);
+        keys.forEach(k => {
+          const ek = `${g.id}|${k}`;
+          electiveSlot.set(ek, elective && electiveSlot.get(ek) !== '#' ? elective.key : '#');
+        });
+        if (shared) return;
+        const dk = `${g.id}~${day}`;
+        cohortDaySessionCount.set(dk, (cohortDaySessionCount.get(dk) ?? 0) + 1);
+      });
+      if (room) markBusy(roomOcc, room.id, keys);
+
+      entries.push({
+        id:           `booked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        termId,
+        courseId:     course?.id  ?? null,
+        facultyId:    faculty?.id ?? null,
+        roomId:       room?.id    ?? null,
+        groupIds:     groups.map(g => g.id),
+        day:          day as ScheduleEntry['day'],
+        startTime,
+        endTime,
+        departmentId: faculty?.department || course?.department || 'General',
+        weeks,
+        category:     asgn.category,
+        school:       schoolOf(asgn),
+      } as ScheduleEntry);
+      if (!room) roomless.push({
+        courseCode: asgn.courseCode, courseName: asgn.courseName, facultyId: asgn.facultyId,
+        facultyName: asgn.facultyName, cohorts: asgn.cohorts, day, startTime, endTime,
+      });
+      if (problems.length) bookedClashes.push({
+        courseCode: asgn.courseCode, courseName: asgn.courseName, facultyId: asgn.facultyId,
+        facultyName: asgn.facultyName, cohorts: asgn.cohorts, category: asgn.category,
+        day, startTime, endTime, problems,
+      });
+    }
+  }
+  const bookedEntries = [...entries];
+
   // ── Collect schedulable rows: must have courseCode + credits > 0 ─────────
-  const courseRows = assignments.filter(a => a.courseCode.trim() && a.credits > 0);
-  const totalSessions = courseRows.reduce((s, a) => s + a.credits, 0);
+  const courseRows = assignments.filter(a => a.courseCode.trim() && a.credits > 0 && !bookedRows.has(a));
+  const totalSessions = courseRows.reduce((s, a) => s + a.credits, 0) + bookedEntries.length;
   const windowedRows = new Set<CourseAssignment>(cohortWindow.size === 0 ? [] :
     courseRows.filter(a => a.cohorts.some(c => { const g = findGroup(c); return !!g && cohortWindow.has(g.id); })));
   const hasCohortWindow = (a: CourseAssignment) => windowedRows.has(a);
@@ -905,6 +1024,9 @@ export async function runAutoScheduler(
     hint: [],
     preUnresolved: [],
     totalSessions,
+    fixed: bookedEntries,
+    fixedRoomless: [...roomless],
+    bookedClashes,
   } : null;
   const entryRow = new Map<ScheduleEntry, number>();
 
@@ -1443,6 +1565,7 @@ export async function runAutoScheduler(
     entries,
     unresolved,
     roomless,
+    bookedClashes,
     stats: {
       totalSessions,
       placed: entries.length,

@@ -50,7 +50,9 @@ export async function runSolver(
   onProgress: (text: string, fraction: number) => void,
 ): Promise<SolverAnswer> {
   // The rows' original sheet data stays here; the solver doesn't need it.
-  const payload = { ...problem, rows: problem.rows.map(({ asgn: _a, ...r }) => r) };
+  // Booked classes stay here too: the solver already sees them as busy hours.
+  const { fixed: _f, fixedRoomless: _r, bookedClashes: _b, ...rest } = problem;
+  const payload = { ...rest, rows: problem.rows.map(({ asgn: _a, ...r }) => r) };
   const started = Date.now();
   const total = problem.rows.reduce((s, r) => s + r.sessions, 0);
   const timer = setInterval(async () => {
@@ -82,7 +84,8 @@ export async function runSolver(
 // gives, so preview, the Excel conflict report and Apply work unchanged.
 export function resultFromSolver(problem: SolverProblem, ans: SolverAnswer, termId: string, weeks: number[]): SchedulerResult {
   const stamp = Date.now();
-  const entries: ScheduleEntry[] = ans.placed.map(([r, day, startTime, endTime, roomId], i) => {
+  const fixed = problem.fixed ?? [];
+  const solved: ScheduleEntry[] = ans.placed.map(([r, day, startTime, endTime, roomId], i) => {
     const row = problem.rows[r];
     return {
       id: `solver-${stamp}-${i}`,
@@ -100,6 +103,7 @@ export function resultFromSolver(problem: SolverProblem, ans: SolverAnswer, term
       school: row.school,
     } as ScheduleEntry;
   });
+  const entries = [...fixed, ...solved];
   const unresolved: UnresolvedSession[] = [...problem.preUnresolved];
   for (const u of ans.unplaced) {
     const row = problem.rows[u.row];
@@ -133,7 +137,9 @@ export function resultFromSolver(problem: SolverProblem, ans: SolverAnswer, term
   return {
     entries,
     unresolved,
-    roomless: [],
+    // Booked classes that had no free room (the solver gives every class a room).
+    roomless: problem.fixedRoomless ?? [],
+    bookedClashes: problem.bookedClashes ?? [],
     stats: { totalSessions: problem.totalSessions, placed: entries.length, unresolvedCount: problem.totalSessions - entries.length },
   };
 }
